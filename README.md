@@ -1,0 +1,1 @@
+# Tingutong\n\nA股语音播报 App Phase 1 MVP\n\n## 快速开始\n```bash\ncd tingutong\nflutter pub get\nflutter run\n```\n\n## 数据源\n腾讯行情 qt.gtimg.cn REST批量接口\n\n## 后台Daemon\n/workspace/stock_monitor/daemon.js\n
