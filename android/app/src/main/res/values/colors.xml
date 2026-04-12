@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#E84057</color>
+    <color name="primary_dark">#C9304A</color>
+    <color name="accent">#6C63FF</color>
+    <color name="background">#F5F6FA</color>
+    <color name="gain">#E84057</color>
+    <color name="loss">#34C759</color>
+</resources>
