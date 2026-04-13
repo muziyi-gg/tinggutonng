@@ -10,31 +10,15 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # 状态管理
   provider: ^6.1.2
-
-  # 本地存储
   hive: ^2.2.3
   hive_flutter: ^1.1.0
-
-  # HTTP 请求
   http: ^1.2.1
-
-  # TTS 语音播报（核心功能）
   flutter_tts: ^4.0.2
-
-  # 本地通知（锁屏播报）
-  flutter_local_notifications: ^18.0.1
-
-  # 权限处理
+  flutter_local_notifications: ^19.0.0
   permission_handler: ^11.3.1
-
-  # 屏幕常亮（后台播报时保持）
   wakelock_plus: ^1.2.8
-
-  # 时间格式化
   intl: ^0.19.0
-
   cupertino_icons: ^1.0.8
 
 dev_dependencies:
