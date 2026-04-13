@@ -8,34 +8,74 @@ class NotificationService {
   bool _initOk = false;
 
   Future<void> init() async {
-    if (Platform.isAndroid) {
-      await Permission.notification.request();
-      const android = AndroidInitializationSettings('@mipmap/ic_launcher');
-      const init = InitializationSettings(android: android);
-      await _f.initialize(init, onDidReceiveNotificationResponse: _onTap);
-      _initOk = true;
-    }
+    if (!Platform.isAndroid) return;
+
+    // 请求通知权限
+    await Permission.notification.request();
+
+    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const initSettings = InitializationSettings(android: android);
+
+    await _f.initialize(
+      initSettings,
+      onDidReceiveNotificationResponse: _onTap,
+      onDidReceiveBackgroundNotificationResponse: _onBackgroundTap,
+    );
+
+    // Android 8+ 必须创建通知渠道
+    const channel = AndroidNotificationChannel(
+      'tingutong_alerts',
+      '听股通行情播报',
+      description: '听股通实时行情语音播报通知',
+      importance: Importance.high,
+      playSound: true,
+      enableVibration: true,
+    );
+
+    await _f
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(channel);
+
+    _initOk = true;
   }
 
   void _onTap(NotificationResponse r) {
     debugPrint('Notification tapped: ${r.payload}');
   }
 
-  Future<void> show({required String title, required String body, String? payload}) async {
+  static void _onBackgroundTap(NotificationResponse r) {
+    debugPrint('Background notification: ${r.payload}');
+  }
+
+  Future<void> show({
+    required String title,
+    required String body,
+    String? payload,
+  }) async {
     if (!_initOk) return;
+
     const androidDetail = AndroidNotificationDetails(
       'tingutong_alerts',
-      '听股通预警',
-      channelDescription: '听股通行情预警通知',
+      '听股通行情播报',
+      channelDescription: '听股通实时行情语音播报通知',
       importance: Importance.high,
       priority: Priority.high,
       playSound: true,
       enableVibration: true,
       category: AndroidNotificationCategory.alarm,
+      styleInformation: BigTextStyleInformation(''),
     );
+
     const detail = NotificationDetails(android: androidDetail);
-    await _f.show(DateTime.now().millisecondsSinceEpoch % 100000,
-        title, body, detail, payload: payload);
+
+    await _f.show(
+      DateTime.now().millisecondsSinceEpoch % 100000,
+      title,
+      body,
+      detail,
+      payload: payload,
+    );
   }
 
   Future<void> cancelAll() async {
