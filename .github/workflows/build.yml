@@ -9,17 +9,30 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.22.0'
           channel: 'stable'
           cache: true
-      - run: flutter pub get
-      - run: flutter build apk --release
-      - uses: actions/upload-artifact@v4
+          cache-key: flutter-3-22-0-{{ checksum 'pubspec.yaml' }}
+          cache-path: ~/.pub-cache
+
+      - name: Clean stale build cache
+        run: flutter clean
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build debug APK
+        run: flutter build apk --debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
-          name: tingutong-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
-          retention-days: 7
+          name: tingutong-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 3
