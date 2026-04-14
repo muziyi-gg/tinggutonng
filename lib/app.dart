@@ -29,7 +29,7 @@ class TingutongApp extends StatelessWidget {
           useMaterial3: true,
           fontFamily: 'PingFang',
           colorScheme: ColorScheme.fromSeed(
-            seed: const Color(0xFFE84057),
+            seedColor: const Color(0xFFE84057),
             brightness: Brightness.light,
           ),
           scaffoldBackgroundColor: const Color(0xFFF5F6FA),
