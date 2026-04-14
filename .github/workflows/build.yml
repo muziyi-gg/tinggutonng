@@ -18,8 +18,6 @@ jobs:
           flutter-version: '3.22.0'
           channel: 'stable'
           cache: true
-          cache-key: flutter-3-22-0-{{ checksum 'pubspec.yaml' }}
-          cache-path: ~/.pub-cache
 
       - name: Clean stale build cache
         run: flutter clean
