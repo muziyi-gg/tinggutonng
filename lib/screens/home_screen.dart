@@ -21,7 +21,7 @@ class HomeScreen extends StatelessWidget {
   }
 
   Widget _buildHeader(BuildContext ctx) {
-    final sp = context.watch<StockProvider>();
+    final sp = Provider.of<StockProvider>(ctx);
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
       decoration: const BoxDecoration(color: Colors.white),
@@ -40,7 +40,7 @@ class HomeScreen extends StatelessWidget {
   }
 
   Widget _buildBody(BuildContext ctx) {
-    final sp = context.watch<StockProvider>();
+    final sp = Provider.of<StockProvider>(ctx);
     final stocks = sp.stockList;
     final alerts = sp.recentAlerts;
 
@@ -63,9 +63,9 @@ class HomeScreen extends StatelessWidget {
             ),
           ),
         ),
-      SliverToBoxAdapter(child: _buildMonitorEntry(ctx)),
+      SliverToBoxAdapter(child: _buildMonitorEntry()),
       if (alerts.isNotEmpty) ...[
-        SliverToBoxAdapter(child: _sectionTitle('最近播报', null)),
+        SliverToBoxAdapter(child: _sectionTitle('最近播报')),
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
           sliver: SliverList(
@@ -79,7 +79,7 @@ class HomeScreen extends StatelessWidget {
     ]);
   }
 
-  Widget _buildMonitorEntry(BuildContext ctx) {
+  Widget _buildMonitorEntry() {
     return GestureDetector(
       onTap: onNavigateSettings,
       child: Container(
@@ -215,7 +215,7 @@ class _EmptyState extends StatelessWidget {
         SizedBox(height:12),
         Text('暂无自选股', style:TextStyle(fontSize:15, color:Color(0xFF9999AA))),
         SizedBox(height:4),
-        Text('点击上方"+"添加您的第一只股票', style:TextStyle(fontSize:12, color:Color(0xFFBBBBCC))),
+        Text('点击上方\"+\"添加您的第一只股票', style:TextStyle(fontSize:12, color:Color(0xFFBBBBCC))),
       ]),
     );
   }
