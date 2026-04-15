@@ -1,35 +1,13 @@
-import 'package:hive/hive.dart';
-
-part 'stock.g.dart';
-
-/// 股票行情数据模型
-@HiveType(typeId: 0)
-class Stock extends HiveObject {
-  @HiveField(0)
+/// 股票行情数据模型（纯内存版，无需持久化）
+class Stock {
   final String code; // 腾讯格式: sh600519
-
-  @HiveField(1)
   final String name;
-
-  @HiveField(2)
   double price; // 当前价
-
-  @HiveField(3)
   double prevClose; // 昨收
-
-  @HiveField(4)
   double change; // 涨跌额
-
-  @HiveField(5)
   double changePct; // 涨跌幅%
-
-  @HiveField(6)
   DateTime lastUpdate;
-
-  @HiveField(7)
   int reportIntervalSec; // 播报间隔(秒): 30/60/300
-
-  @HiveField(8)
   bool enabled; // 是否启用播报
 
   Stock({
@@ -60,11 +38,11 @@ class Stock extends HiveObject {
     return prevClose * (1 - pct);
   }
 
-  /// 5分钟前价格快照（用于计算5分钟涨跌幅）
+  /// 5分钟前价格快照
   double? fiveMinAgoPrice;
   DateTime? fiveMinAgoTime;
 
-  /// 更新5分钟前的快照（每分钟调用一次）
+  /// 更新5分钟前的快照
   void updateFiveMinSnapshot() {
     fiveMinAgoPrice = price;
     fiveMinAgoTime = DateTime.now();
