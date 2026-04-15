@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
 class LiveStatusIndicator extends StatefulWidget {
-  final bool connected;
-  const LiveStatusIndicator({super.key, required this.connected});
+  final bool polling;
+  const LiveStatusIndicator({super.key, required this.polling});
   @override
   State<LiveStatusIndicator> createState() => _LiveStatusIndicatorState();
 }
@@ -18,14 +18,14 @@ class _LiveStatusIndicatorState extends State<LiveStatusIndicator>
     _ctrl = AnimationController(duration:const Duration(milliseconds:1800), vsync:this);
     _anim = Tween<double>(begin:0.4, end:1.0).animate(
       CurvedAnimation(parent:_ctrl, curve: Curves.easeInOut));
-    if (widget.connected) _ctrl.repeat(reverse:true);
+    if (widget.polling) _ctrl.repeat(reverse:true);
   }
 
   @override
   void didUpdateWidget(LiveStatusIndicator old) {
     super.didUpdateWidget(old);
-    if (widget.connected && !_ctrl.isAnimating) _ctrl.repeat(reverse:true);
-    if (!widget.connected) _ctrl.stop();
+    if (widget.polling && !_ctrl.isAnimating) _ctrl.repeat(reverse:true);
+    if (!widget.polling) _ctrl.stop();
   }
 
   @override
@@ -40,7 +40,7 @@ class _LiveStatusIndicatorState extends State<LiveStatusIndicator>
           width:8, height:8,
           decoration: BoxDecoration(
             shape:BoxShape.circle,
-            color: widget.connected
+            color: widget.polling
                 ? const Color(0xFF34C759).withOpacity(_anim.value)
                 : const Color(0xFFDDDDDD),
           ),
@@ -48,10 +48,10 @@ class _LiveStatusIndicatorState extends State<LiveStatusIndicator>
       ),
       const SizedBox(width:6),
       Text(
-        widget.connected ? '后台运行中' : '已断开',
+        widget.polling ? '后台运行中' : '已断开',
         style: TextStyle(
           fontSize:12,
-          color: widget.connected ? const Color(0xFF34C759) : const Color(0xFFBBBBCC),
+          color: widget.polling ? const Color(0xFF34C759) : const Color(0xFFBBBBCC),
           fontWeight: FontWeight.w500,
         ),
       ),

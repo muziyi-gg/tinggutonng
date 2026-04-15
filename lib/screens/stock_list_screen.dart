@@ -8,7 +8,7 @@ class StockListScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext ctx) {
-    final sp = context.watch<StockProvider>();
+    final sp = Provider.of<StockProvider>(ctx);
     final stocks = sp.stockList;
 
     return Scaffold(
@@ -58,6 +58,7 @@ class _StockListItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext ctx) {
+    final sp = Provider.of<StockProvider>(ctx, listen: false);
     final isUp = stock.changePct >= 0;
     final color = isUp ? const Color(0xFFE84057) : const Color(0xFF34C759);
 
@@ -70,7 +71,7 @@ class _StockListItem extends StatelessWidget {
         decoration: BoxDecoration(color:const Color(0xFFE84057), borderRadius:BorderRadius.circular(12)),
         child: const Icon(Icons.delete_outline, color:Colors.white),
       ),
-      onDismissed: (_) => context.read<StockProvider>().removeStock(stock.code),
+      onDismissed: (_) => sp.removeStock(stock.code),
       child: Container(
         margin: const EdgeInsets.only(bottom:10),
         padding: const EdgeInsets.all(14),
@@ -120,7 +121,6 @@ class _AddStockSheetState extends State<_AddStockSheet> {
     if (q.length < 2) { setState(() => _suggestions.clear()); return; }
     setState(() { _loading = true; _suggestions.clear(); });
 
-    // 常用股票快速匹配（无需网络）
     final common = _commonStocks();
     final q2 = q.toLowerCase();
     final filtered = common.where((s) =>
@@ -221,7 +221,7 @@ class _AddStockSheetState extends State<_AddStockSheet> {
                   subtitle: Text(s.code, style:const TextStyle(fontSize:12, color:Color(0xFF9999AA))),
                   trailing: const Icon(Icons.add, color:Color(0xFFE84057), size:20),
                   onTap: () {
-                    context.read<StockProvider>().addStock(s.code, s.name);
+                    Provider.of<StockProvider>(ctx, listen: false).addStock(s.code, s.name);
                     Navigator.pop(ctx);
                   },
                 );
