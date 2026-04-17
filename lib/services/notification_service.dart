@@ -10,9 +10,7 @@ class NotificationService {
   Future<void> init() async {
     if (!Platform.isAndroid) return;
 
-    // 请求通知权限
-    await Permission.notification.request();
-
+    // 不再这里请求权限，改为播报时按需请求
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
     const initSettings = InitializationSettings(android: android);
 
@@ -53,7 +51,17 @@ class NotificationService {
     required String body,
     String? payload,
   }) async {
-    if (!_initOk) return;
+    if (!_initOk) {
+      // 初始化失败，先尝试再次初始化
+      await init();
+      if (!_initOk) return;
+    }
+
+    // 播报时检查并请求通知权限
+    final status = await Permission.notification.status;
+    if (status.isDenied) {
+      await Permission.notification.request();
+    }
 
     const androidDetail = AndroidNotificationDetails(
       'tingutong_alerts',

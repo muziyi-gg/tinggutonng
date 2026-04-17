@@ -115,7 +115,17 @@ class _AddStockSheetState extends State<_AddStockSheet> {
   bool _loading = false;
 
   @override
+  void initState() {
+    super.initState();
+    _ctrl.addListener(_onSearchChanged);
+  }
+
+  @override
   void dispose() { _ctrl.dispose(); super.dispose(); }
+
+  void _onSearchChanged() {
+    _search(_ctrl.text);
+  }
 
   Future<void> _search(String q) async {
     if (q.length < 2) { setState(() => _suggestions.clear()); return; }
@@ -195,7 +205,7 @@ class _AddStockSheetState extends State<_AddStockSheet> {
               fillColor: const Color(0xFFF5F5F7),
               border: OutlineInputBorder(borderRadius:BorderRadius.circular(12), borderSide:BorderSide.none),
             ),
-            onChanged: _search,
+            onChanged: (v) {}, // 保留但用 listener 处理
           ),
         ),
         const SizedBox(height:12),
