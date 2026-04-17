@@ -33,4 +33,4 @@ jobs:
         with:
           name: tingutong-debug-apk
           path: build/app/outputs/flutter-apk/app-debug.apk
-          retention-days: 3
+          retention-days: 7
