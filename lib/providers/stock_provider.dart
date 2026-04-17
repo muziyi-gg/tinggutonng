@@ -35,14 +35,21 @@ class StockProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 开始监控：添加股票，启动轮询
-  void startWatch(List<String> codes, {int reportIntervalSec = 60}) {
-    _reportIntervalSec = reportIntervalSec;
-    _isPolling = true;
+  /// 开始监控：启动轮询（内部使用，无需外部调用）
+  void _ensureWatchRunning() {
+    if (_isPolling) {
+      // 已经运行中，重启轮询以包含最新股票列表
+      _pollTimer?.cancel();
+      _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) => _pollPricesLive());
+      return;
+    }
 
-    // 每秒轮询价格
-    _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) => _pollPrices(codes));
+    final codes = _stocks.keys.toList();
+    if (codes.isEmpty) return;
+
+    _isPolling = true;
+    // 每秒轮询价格（使用 _pollPricesLive 读取实时股票列表）
+    _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) => _pollPricesLive());
 
     // 定时播报
     _reportTimer?.cancel();
@@ -50,6 +57,9 @@ class StockProvider extends ChangeNotifier {
       Duration(seconds: _reportIntervalSec),
       (_) => _reportAll(),
     );
+
+    // 立即获取一次价格
+    _pollPricesLive();
 
     notifyListeners();
   }
@@ -65,12 +75,18 @@ class StockProvider extends ChangeNotifier {
   void addStock(String code, String name) {
     if (!_stocks.containsKey(code)) {
       _stocks[code] = Stock(code: code, name: name);
+      _ensureWatchRunning();
       notifyListeners();
     }
   }
 
   void removeStock(String code) {
     _stocks.remove(code);
+    if (_stocks.isEmpty) {
+      stopWatch();
+    } else {
+      _ensureWatchRunning();
+    }
     notifyListeners();
   }
 
@@ -78,17 +94,20 @@ class StockProvider extends ChangeNotifier {
     _reportIntervalSec = seconds;
     // 重新启动定时器
     _reportTimer?.cancel();
-    _reportTimer = Timer.periodic(
-      Duration(seconds: seconds),
-      (_) => _reportAll(),
-    );
+    if (_isPolling) {
+      _reportTimer = Timer.periodic(
+        Duration(seconds: seconds),
+        (_) => _reportAll(),
+      );
+    }
     notifyListeners();
   }
 
-  /// 每秒轮询：获取最新价格
-  Future<void> _pollPrices(List<String> codes) async {
-    if (codes.isEmpty) return;
+  /// 每秒轮询：获取最新价格（从实时股票列表）
+  Future<void> _pollPricesLive() async {
+    if (_stocks.isEmpty) return;
     try {
+      final codes = _stocks.keys.toList();
       final uri = Uri.parse('https://qt.gtimg.cn/q=${codes.join(",")}');
       final resp = await http.get(
         uri,
