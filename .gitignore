@@ -1,1 +1,4 @@
-.dart_tool/\n.packages\n.pub/\nbuild/\nandroid/.gradle/\nandroid/app/build/\n*.lock\n
+.dart_tool/\n.packages\n.pub/\nbuild/\nandroid/.gradle/\nandroid/app/build/\n*.lock
+*.apk
+*.aab
+apk_part_*.bin\n
