@@ -36,14 +36,6 @@ class TtsService {
     await _tts.setVolume(1.0);
     await _tts.setPitch(1.0);
 
-    // Android 4.1+: 设置音频焦点和导航场景属性（修复 Android 11+ 无声）
-    if (defaultTargetPlatform == TargetPlatform.android) {
-      try {
-        // setIosAudioCategory 等方法不存在于所有版本，加 try-catch
-        await _tts.setSharedInstance(false);
-      } catch (_) {}
-    }
-
     // start handler: 开始播放时更新状态
     _tts.setStartHandler(() {
       debugPrint('TTS start');
