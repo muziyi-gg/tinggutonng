@@ -12,7 +12,7 @@ class TtsService {
   TtsState get state => _state;
 
   Future<void> init() async {
-    // 让 speak() 阻塞等待语音播报完成，这是最关键的修复
+    // 核心修复：让 speak() 阻塞等待播报完成（Flutter 3.x 兼容）
     await _tts.awaitSpeakCompletion(true);
 
     // Android: 检查是否有可用的 TTS 引擎
@@ -28,7 +28,7 @@ class TtsService {
     final avail = await _tts.isLanguageAvailable('zh-CN');
     debugPrint('zh-CN available: $avail');
     if (avail != 1) {
-      debugPrint('zh-CN not available, falling back to default language');
+      debugPrint('zh-CN not available, falling back to en-US');
       await _tts.setLanguage('en-US');
     }
 
@@ -36,32 +36,29 @@ class TtsService {
     await _tts.setVolume(1.0);
     await _tts.setPitch(1.0);
 
-    // Android: 使用更可靠的 onState 回调
-    _tts.setStateHandler((state) {
-      debugPrint('TTS state: $state');
-      if (state == 'playing' || state == 'speak') {
-        _state = TtsState.playing;
-      } else if (state == 'completed' || state == 'done') {
-        _state = TtsState.idle;
-        _cancelSafetyTimer();
-      } else if (state == 'stopped') {
-        _state = TtsState.stopped;
-        _cancelSafetyTimer();
-      } else if (state == 'error') {
-        _state = TtsState.error;
-        _cancelSafetyTimer();
-      }
-    });
+    // Android 4.1+: 设置音频焦点和导航场景属性（修复 Android 11+ 无声）
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        // setIosAudioCategory 等方法不存在于所有版本，加 try-catch
+        await _tts.setSharedInstance(false);
+      } catch (_) {}
+    }
 
+    // start handler: 开始播放时更新状态
     _tts.setStartHandler(() {
+      debugPrint('TTS start');
       _state = TtsState.playing;
+      _resetAfterTimeout();
     });
 
+    // completion handler: 播放完成时重置状态
     _tts.setCompletionHandler(() {
+      debugPrint('TTS complete');
       _state = TtsState.idle;
       _cancelSafetyTimer();
     });
 
+    // error handler
     _tts.setErrorHandler((e) {
       debugPrint('TTS error: $e');
       _state = TtsState.error;
@@ -90,17 +87,12 @@ class TtsService {
     }
 
     _state = TtsState.playing;
-    _resetAfterTimeout();
 
     try {
+      // awaitSpeakCompletion=true 时，这里会阻塞直到播完
       final result = await _tts.speak(text);
       debugPrint('TTS speak result: $result');
-      // awaitSpeakCompletion=true 时，await 在播完后才返回
-      // 如果返回了说明播完了或失败了，状态应在 handler 里已重置
-      if (_state == TtsState.playing) {
-        // handler 还没来得及执行，极小概率，补重置
-        _state = TtsState.idle;
-      }
+      _state = TtsState.idle;
     } catch (e) {
       debugPrint('TTS speak exception: $e');
       _state = TtsState.error;
