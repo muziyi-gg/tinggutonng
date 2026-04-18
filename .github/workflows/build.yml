@@ -25,12 +25,12 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Build debug APK
-        run: flutter build apk --debug
+      - name: Build release APK
+        run: flutter build apk --release
 
-      - name: Upload APK
+      - name: Upload APK(s)
         uses: actions/upload-artifact@v4
         with:
-          name: tingutong-debug-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          name: tingutong-release-apk
+          path: build/app/outputs/flutter-apk/
           retention-days: 7
