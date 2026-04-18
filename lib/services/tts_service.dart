@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
 enum TtsState { idle, playing, stopped, error }
@@ -33,16 +34,9 @@ class TtsService {
       debugPrint('Available TTS engines: $engines');
       if (engines == null || (engines as List).isEmpty) {
         debugPrint('WARNING: No TTS engine found on device!');
-        // 不抛异常，改为在 speak 时检测
       } else {
         _engineAvailable = true;
       }
-
-      // 优先使用系统默认 TTS 引擎（通常是最好的中文引擎）
-      try {
-        await _tts.setSharedSession(true);
-        debugPrint('TTS shared session enabled');
-      } catch (_) {}
     }
 
     // 设置中文语言
