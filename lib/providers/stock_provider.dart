@@ -7,6 +7,13 @@ import '../models/alert_type.dart';
 import '../services/tts_service.dart';
 import '../services/notification_service.dart';
 
+/// 播报错误信息，用于 UI 层展示
+class ReportError {
+  final String message;
+  final bool needsEngineInstall;
+  ReportError(this.message, {this.needsEngineInstall = false});
+}
+
 /// 听股通 Phase 1 MVP — 核心播报引擎
 /// 数据流：API轮询 → 播报间隔判断 → TTS语音 + 本地通知
 class StockProvider extends ChangeNotifier {
@@ -23,11 +30,20 @@ class StockProvider extends ChangeNotifier {
   // 暂停播报标志（防止播报重叠）
   bool _speaking = false;
 
+  // 当前错误（UI 层负责展示和清除）
+  ReportError? _lastError;
+
   Map<String, Stock> get stocks => _stocks;
   List<Stock> get stockList => _stocks.values.toList();
   List<AlertItem> get recentAlerts => _recentAlerts;
   bool get isPolling => _isPolling;
   int get reportIntervalSec => _reportIntervalSec;
+  ReportError? get lastError => _lastError;
+
+  void clearError() {
+    _lastError = null;
+    notifyListeners();
+  }
 
   Future<void> init() async {
     await _tts.init();
@@ -177,15 +193,36 @@ class StockProvider extends ChangeNotifier {
     if (_recentAlerts.length > 30) _recentAlerts.removeLast();
     notifyListeners();
 
-    // TTS 语音播报
-    await _tts.speak(text);
+    // TTS 语音播报（捕获异常，错误由 reportAllStocks 统一处理）
+    try {
+      await _tts.speak(text);
+      _lastError = null;
+    } on TtsException catch (e) {
+      debugPrint('TTS speak failed: $e');
+      _lastError = ReportError(e.message, needsEngineInstall: e.engineMissing);
+      notifyListeners();
+      return; // 跳过本次播报，继续下一只
+    }
     // 本地通知
     await _notif.show(title: '听股通播报', body: text);
   }
 
   /// 手动播报（首页按钮触发）
-  Future<void> reportAllStocks() async {
+  /// 返回错误信息供 UI 弹窗使用
+  Future<ReportError?> reportAllStocks() async {
+    if (_speaking) {
+      _lastError = ReportError('正在播报中，请稍候...');
+      notifyListeners();
+      return _lastError;
+    }
+    if (_stocks.isEmpty) {
+      _lastError = ReportError('请先添加自选股');
+      notifyListeners();
+      return _lastError;
+    }
     await _reportAll();
+    // 如果 _reportAll 中 TTS 失败，_lastError 会被设置
+    return _lastError;
   }
 
   @override

@@ -31,7 +31,7 @@ class HomeScreen extends StatelessWidget {
         LiveStatusIndicator(polling: sp.isPolling),
         const Spacer(),
         IconButton(
-          onPressed: () => sp.reportAllStocks(),
+          onPressed: () => _handleReport(ctx),
           icon: const Icon(Icons.play_circle_fill, color: Color(0xFFE84057), size:28),
           tooltip: '手动播报自选股',
         ),
@@ -99,6 +99,48 @@ class HomeScreen extends StatelessWidget {
           ])),
           Icon(Icons.chevron_right, color:Color(0xFFBBBBCC)),
         ]),
+      ),
+    );
+  }
+
+  Future<void> _handleReport(BuildContext ctx) async {
+    final sp = Provider.of<StockProvider>(ctx, listen: false);
+    final err = await sp.reportAllStocks();
+    if (err != null && ctx.mounted) {
+      _showErrorDialog(ctx, err);
+    }
+  }
+
+  void _showErrorDialog(BuildContext ctx, ReportError err) {
+    showDialog(
+      context: ctx,
+      builder: (ctx) => AlertDialog(
+        title: const Row(children: [
+          Icon(Icons.volume_off, color: Color(0xFFE84057)),
+          SizedBox(width:8),
+          Text('播报失败', style: TextStyle(fontSize:17)),
+        ]),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(err.message, style: const TextStyle(fontSize:14)),
+          if (err.needsEngineInstall) ...[
+            const SizedBox(height:12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF3E0),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('💡 解决方法', style: TextStyle(fontWeight: FontWeight.w600, fontSize:13)),
+                SizedBox(height:4),
+                Text('请前往应用市场，搜索并安装：\n• 讯飞语音引擎（推荐）\n• Google 文字转语音', style: TextStyle(fontSize:12)),
+              ]),
+            ),
+          ],
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('知道了')),
+        ],
       ),
     );
   }
