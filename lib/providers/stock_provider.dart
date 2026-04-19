@@ -195,8 +195,8 @@ class StockProvider extends ChangeNotifier {
   /// 解析腾讯 v_{code}="1~名称~代码~现价~昨收~今开~...~时间~涨跌~涨跌幅%~最高~最低~..." 格式
   /// 字段（~分隔，从0计）：
   /// f[0]=固定1  f[1]=名称  f[2]=代码  f[3]=现价  f[4]=昨收  f[5]=今开
-  /// f[6]=成交量  f[7]=外盘  f[8]=内盘  f[31]=时间戳(YYYYMMDDHHMMSS)
-  /// f[32]=涨跌额  f[33]=涨跌幅%  f[34]=最高  f[35]=最低
+  /// f[6]=成交量  f[7]=外盘  f[8]=内盘  f[30]=时间戳(YYYYMMDDHHMMSS)
+  /// f[31]=涨跌额  f[32]=涨跌幅%  f[33]=最高  f[34]=最低
   void _parseTencentResponse(String raw) {
     final re = RegExp(r'v_(\w+)="([^"]+)"');
     bool changed = false;
@@ -211,20 +211,20 @@ class StockProvider extends ChangeNotifier {
       final price     = double.tryParse(f[3])  ?? 0; // 现价
       final prevClose = double.tryParse(f[4])  ?? 0; // 昨收
       final openPrice = double.tryParse(f[5])  ?? 0; // 今开
-      final change     = double.tryParse(f[32]) ?? 0; // 涨跌额
-      final changePct  = double.tryParse(f[33]) ?? 0; // 涨跌幅%
+      final change     = double.tryParse(f[31]) ?? 0; // 涨跌额
+      final changePct  = double.tryParse(f[32]) ?? 0; // 涨跌幅%
 
-      // 解析时间戳 f[31]：格式 YYYYMMDDHHMMSS
+      // 解析时间戳 f[30]：格式 YYYYMMDDHHMMSS
       DateTime? serverTime;
       DateTime? tradeDate;
-      if (f[31].length >= 14) {
+      if (f[30].length >= 14) {
         try {
-          final y = int.parse(f[31].substring(0, 4));
-          final mon = int.parse(f[31].substring(4, 6));
-          final d = int.parse(f[31].substring(6, 8));
-          final h = int.parse(f[31].substring(8, 10));
-          final mi = int.parse(f[31].substring(10, 12));
-          final s = int.parse(f[31].substring(12, 14));
+          final y = int.parse(f[30].substring(0, 4));
+          final mon = int.parse(f[30].substring(4, 6));
+          final d = int.parse(f[30].substring(6, 8));
+          final h = int.parse(f[30].substring(8, 10));
+          final mi = int.parse(f[30].substring(10, 12));
+          final s = int.parse(f[30].substring(12, 14));
           serverTime = DateTime(y, mon, d, h, mi, s);
           tradeDate = DateTime(y, mon, d);
         } catch (_) {
