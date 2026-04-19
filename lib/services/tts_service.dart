@@ -55,12 +55,21 @@ class TtsService {
       debugPrint('TTS init: platform=android($_isAndroid) ios($_isIos)');
 
       // 关键：Android 需要 setSharedInstance 才能正常工作（4.0+ 有此方法）
+      // 注意：某些设备上 setSharedInstance(true) 会导致 isLanguageAvailable 返回 0
+      // 所以先直接调用，失败时再 fallback
       if (_isAndroid) {
         try {
           await _tts.setSharedInstance(true);
           debugPrint('TTS setSharedInstance(true) OK');
         } catch (e) {
           debugPrint('TTS setSharedInstance not available: $e');
+          // fallback: 尝试直接用系统引擎
+          try {
+            await _tts.setSharedInstance(false);
+            debugPrint('TTS setSharedInstance(false) fallback OK');
+          } catch (e2) {
+            debugPrint('TTS setSharedInstance(false) also failed: $e2');
+          }
         }
       }
 
@@ -84,20 +93,30 @@ class TtsService {
         debugPrint('TTS available engines: $_availableEngines');
       }
 
-      // 设置语言
+      // 设置语言（isLanguageAvailable 在某些引擎上返回 0 但实际仍可播报，
+      // 所以不以此判断是否可用，只记录供参考）
       _currentLanguage = 'zh-CN';
       await _tts.setLanguage('zh-CN');
-      _langAvailable = _normalizeLangAvailable(await _tts.isLanguageAvailable('zh-CN'));
+      try {
+        _langAvailable = _normalizeLangAvailable(await _tts.isLanguageAvailable('zh-CN'));
+      } catch (e) {
+        _langAvailable = 0;
+        debugPrint('TTS isLanguageAvailable(zh-CN) failed: $e');
+      }
       debugPrint('TTS zh-CN available: $_langAvailable');
 
       if (_langAvailable != 1) {
         debugPrint('TTS zh-CN not available, trying en-US');
-        _currentLanguage = 'en-US';
-        await _tts.setLanguage('en-US');
-        final availEn = _normalizeLangAvailable(await _tts.isLanguageAvailable('en-US'));
-        if (availEn == 1) {
-          _langAvailable = availEn;
-          debugPrint('TTS en-US available: $availEn');
+        try {
+          await _tts.setLanguage('en-US');
+          final availEn = _normalizeLangAvailable(await _tts.isLanguageAvailable('en-US'));
+          if (availEn == 1) {
+            _currentLanguage = 'en-US';
+            _langAvailable = availEn;
+            debugPrint('TTS en-US available: $availEn');
+          }
+        } catch (e) {
+          debugPrint('TTS isLanguageAvailable(en-US) failed: $e');
         }
       }
 
