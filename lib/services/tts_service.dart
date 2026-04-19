@@ -33,6 +33,13 @@ class TtsService {
   String get initError => _initError;
   List<dynamic> get availableEngines => _availableEngines;
   int get langAvailable => _langAvailable;
+
+  /// flutter_tts 4.0 返回 bool，旧版返回 int，兼容处理
+  int _normalizeLangAvailable(dynamic val) {
+    if (val is bool) return val ? 1 : 0;
+    if (val is int) return val;
+    return 0;
+  }
   String get currentLanguage => _currentLanguage;
   String? get lastErrorMessage => _lastErrorMessage;
   String? get lastPlatformCode => _lastPlatformCode;
@@ -47,10 +54,14 @@ class TtsService {
       _isIos = defaultTargetPlatform == TargetPlatform.iOS;
       debugPrint('TTS init: platform=android($_isAndroid) ios($_isIos)');
 
-      // 关键：Android 需要 setSharedInstance 才能正常工作
+      // 关键：Android 需要 setSharedInstance 才能正常工作（4.0+ 有此方法）
       if (_isAndroid) {
-        await _tts.setSharedInstance(true);
-        debugPrint('TTS setSharedInstance(true) OK');
+        try {
+          await _tts.setSharedInstance(true);
+          debugPrint('TTS setSharedInstance(true) OK');
+        } catch (e) {
+          debugPrint('TTS setSharedInstance not available: $e');
+        }
       }
 
       // iOS 需要 setIosAudioCategory
@@ -76,14 +87,14 @@ class TtsService {
       // 设置语言
       _currentLanguage = 'zh-CN';
       await _tts.setLanguage('zh-CN');
-      _langAvailable = await _tts.isLanguageAvailable('zh-CN');
+      _langAvailable = _normalizeLangAvailable(await _tts.isLanguageAvailable('zh-CN'));
       debugPrint('TTS zh-CN available: $_langAvailable');
 
       if (_langAvailable != 1) {
         debugPrint('TTS zh-CN not available, trying en-US');
         _currentLanguage = 'en-US';
         await _tts.setLanguage('en-US');
-        final availEn = await _tts.isLanguageAvailable('en-US');
+        final availEn = _normalizeLangAvailable(await _tts.isLanguageAvailable('en-US'));
         if (availEn == 1) {
           _langAvailable = availEn;
           debugPrint('TTS en-US available: $availEn');
@@ -96,7 +107,11 @@ class TtsService {
 
       // 检查是否支持 completion 回调
       if (_isAndroid) {
-        await _tts.isLanguageInstalled('zh-CN');
+        try {
+          await _tts.isLanguageInstalled('zh-CN');
+        } catch (e) {
+          debugPrint('TTS isLanguageInstalled: $e');
+        }
       }
 
       await _tts.setSpeechRate(0.85);
