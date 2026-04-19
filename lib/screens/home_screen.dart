@@ -23,24 +23,37 @@ class HomeScreen extends StatelessWidget {
 
   Widget _buildHeader(BuildContext ctx) {
     final sp = Provider.of<StockProvider>(ctx);
+    final isSpeaking = sp.isSpeaking;
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
       decoration: const BoxDecoration(color: Colors.white),
       child: Row(children: [
         const Text('听股通', style: TextStyle(fontSize:22, fontWeight:FontWeight.bold, color:Color(0xFF1A1A2E))),
         const SizedBox(width:8),
-        LiveStatusIndicator(polling: sp.isPolling),
+        LiveStatusIndicator(polling: sp.isPolling || isSpeaking),
         const Spacer(),
         IconButton(
           onPressed: onNavigateDebug,
           icon: const Icon(Icons.bug_report_outlined, color: Color(0xFF666687), size:22),
           tooltip: 'TTS调试',
         ),
-        IconButton(
-          onPressed: () => _handleReport(ctx),
-          icon: const Icon(Icons.play_circle_fill, color: Color(0xFFE84057), size:28),
-          tooltip: '手动播报自选股',
-        ),
+        // 播报中显示停止按钮，否则显示播放按钮
+        if (isSpeaking)
+          IconButton(
+            onPressed: () => _handleStop(ctx),
+            icon: const Icon(Icons.stop_circle, color: Color(0xFFFF9500), size:28),
+            tooltip: '停止播报',
+          )
+        else
+          IconButton(
+            onPressed: sp.stockList.isEmpty ? null : () => _handleReport(ctx),
+            icon: Icon(
+              Icons.play_circle_fill,
+              color: sp.stockList.isEmpty ? const Color(0xFFDDDDDD) : const Color(0xFFE84057),
+              size:28,
+            ),
+            tooltip: '手动播报自选股',
+          ),
       ]),
     );
   }
@@ -115,6 +128,11 @@ class HomeScreen extends StatelessWidget {
     if (err != null && ctx.mounted) {
       _showErrorDialog(ctx, err);
     }
+  }
+
+  Future<void> _handleStop(BuildContext ctx) async {
+    final sp = Provider.of<StockProvider>(ctx, listen: false);
+    await sp.stopSpeaking();
   }
 
   void _showErrorDialog(BuildContext ctx, ReportError err) {

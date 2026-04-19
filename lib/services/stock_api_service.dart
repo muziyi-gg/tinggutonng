@@ -26,7 +26,7 @@ class StockApiService {
     return _parseSinaResponse(_decodeGbk(resp.bodyBytes));
   }
 
-  /// 解析新浪 hq_str_{code}="name,price,prevClose,open,vol,... 时间" 格式
+  /// 解析新浪 hq_str_{code}="name,price,prevClose,open,vol,... 日期,时间" 格式
   Map<String, StockRaw> _parseSinaResponse(String raw) {
     final Map<String, StockRaw> result = {};
     final re = RegExp(r'hq_str_(\w+)="([^"]+)"');
@@ -42,9 +42,9 @@ class StockApiService {
       final vol = double.tryParse(f[4]) ?? 0;
       final high = double.tryParse(f[5]) ?? 0;
       final low = double.tryParse(f[6]) ?? 0;
-      // f[30] = 日期, f[31] = 时间
-      final ts = (f.length > 31 && f[30].isNotEmpty)
-          ? '${f[30]} ${f[31]}'
+      // f[30] = 日期(YYYY-MM-DD), f[31] = 时间(HH:MM:SS)
+      final ts = (f[30].isNotEmpty && f[31].isNotEmpty)
+          ? '${f[30]}T${f[31]}'
           : DateTime.now().toIso8601String();
       result[code] = StockRaw(
         code: code,

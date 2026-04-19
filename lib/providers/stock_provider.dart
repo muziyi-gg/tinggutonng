@@ -29,6 +29,8 @@ class StockProvider extends ChangeNotifier {
 
   // 暂停播报标志（防止播报重叠）
   bool _speaking = false;
+  // 停止请求标志（用户主动停止）
+  bool _stopRequested = false;
 
   // 当前错误（UI 层负责展示和清除）
   ReportError? _lastError;
@@ -39,6 +41,7 @@ class StockProvider extends ChangeNotifier {
   bool get isPolling => _isPolling;
   int get reportIntervalSec => _reportIntervalSec;
   ReportError? get lastError => _lastError;
+  bool get isSpeaking => _speaking;
 
   void clearError() {
     _lastError = null;
@@ -186,16 +189,16 @@ class StockProvider extends ChangeNotifier {
     }
   }
 
-  /// 解析新浪 hq_str_{code}="name,price,prevClose,open,vol,..." 格式
+  /// 解析新浪 hq_str_{code}="name,price,prevClose,open,vol,... 日期,时间" 格式
   void _parseSinaResponse(String raw) {
-    // 匹配 var hq_str_sz300059="东方财富,19.95,20.03,19.90,...";
+    // 匹配 var hq_str_sz300059="东方财富,19.95,20.03,19.90,... 日期,时间,...";
     final re = RegExp(r'hq_str_(\w+)="([^"]+)"');
     bool changed = false;
     int matched = 0;
     for (final m in re.allMatches(raw)) {
       final code = m[1]!;
       final f = m[2]!.split(',');
-      if (f.length < 4) {
+      if (f.length < 32) {
         debugPrint('Sina skip $code: fields=${f.length}');
         continue;
       }
@@ -203,6 +206,17 @@ class StockProvider extends ChangeNotifier {
       final prevClose = double.tryParse(f[2]) ?? 0;
       final change = prevClose > 0 ? price - prevClose : 0.0;
       final changePct = prevClose > 0 ? (change / prevClose) * 100 : 0.0;
+
+      // 解析服务器时间：f[30]=日期(YYYY-MM-DD), f[31]=时间(HH:MM:SS)
+      DateTime? serverTime;
+      if (f[30].isNotEmpty && f[31].isNotEmpty) {
+        try {
+          final dateStr = '${f[30]} ${f[31]}';
+          serverTime = DateTime.parse(dateStr.replaceFirst(' ', 'T'));
+        } catch (_) {
+          serverTime = DateTime.now();
+        }
+      }
 
       if (_stocks.containsKey(code)) {
         _stocks[code] = Stock(
@@ -212,7 +226,7 @@ class StockProvider extends ChangeNotifier {
           prevClose: prevClose,
           change: change,
           changePct: changePct,
-          lastUpdate: DateTime.now(),
+          lastUpdate: serverTime ?? DateTime.now(),
         );
         changed = true;
         matched++;
@@ -236,12 +250,16 @@ class StockProvider extends ChangeNotifier {
   /// 定时播报：按间隔播报所有股票
   Future<void> _reportAll() async {
     if (_stocks.isEmpty) return;
-    // 重置 speaking 状态，允许新的播报请求进来（即使上一次未完成）
-    _speaking = false;
     _speaking = true;
+    _stopRequested = false;
     try {
       bool anySkipped = false;
       for (final s in _stocks.values) {
+        // 检查用户是否请求停止
+        if (_stopRequested) {
+          debugPrint('TTS stop requested, aborting');
+          break;
+        }
         if (s.price <= 0) {
           debugPrint('TTS skip ${s.name}: price=${s.price} (数据未就绪)');
           anySkipped = true;
@@ -250,7 +268,10 @@ class StockProvider extends ChangeNotifier {
         final dir = s.changePct >= 0 ? '涨' : '跌';
         final text = '${s.name}，报${s.price.toStringAsFixed(2)}元，$dir${s.changePct.abs().toStringAsFixed(2)}%';
         await _speakAndNotify(text, AlertType.selfQuote);
+        // 播报间隔（等待上一句播完 + 短暂停顿）
         await Future.delayed(const Duration(milliseconds: 800));
+        // 停止请求检查（延迟后再次检查）
+        if (_stopRequested) break;
       }
       // 所有股票价格都是0，说明行情未拉到
       if (anySkipped && _stocks.values.every((s) => s.price <= 0)) {
@@ -261,8 +282,17 @@ class StockProvider extends ChangeNotifier {
       debugPrint('TTS _reportAll error: $e');
     } finally {
       _speaking = false;
+      _stopRequested = false;
       notifyListeners(); // 确保 UI 始终收到状态更新
     }
+  }
+
+  /// 停止当前播报（用户点击停止按钮）
+  Future<void> stopSpeaking() async {
+    _stopRequested = true;
+    await _tts.stop();
+    _speaking = false;
+    notifyListeners();
   }
 
   Future<void> _speakAndNotify(String text, AlertType type) async {
@@ -282,8 +312,7 @@ class StockProvider extends ChangeNotifier {
       notifyListeners();
       return; // 跳过本次播报，继续下一只
     }
-    // 本地通知
-    await _notif.show(title: '听股通播报', body: text);
+    // 不再发送本地通知（用户只需要听语音即可）
   }
 
   /// 手动播报（首页按钮触发）
