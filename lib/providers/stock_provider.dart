@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/stock.dart';
 import '../models/alert_type.dart';
 import '../services/tts_service.dart';
@@ -47,7 +48,42 @@ class StockProvider extends ChangeNotifier {
   Future<void> init() async {
     await _tts.init();
     await _notif.init();
+    // 从本地存储恢复自选股
+    await _loadStocks();
     notifyListeners();
+  }
+
+  static const _kKey = 'watchlist_v2';
+
+  Future<void> _loadStocks() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_kKey);
+      if (raw == null || raw.isEmpty) return;
+      final list = jsonDecode(raw) as List;
+      for (final item in list) {
+        final code = item['code'] as String;
+        final name = item['name'] as String;
+        _stocks[code] = Stock(code: code, name: name);
+      }
+      if (_stocks.isNotEmpty) {
+        _ensureWatchRunning();
+        // 立即获取一次价格
+        _pollPricesLive();
+      }
+    } catch (e) {
+      debugPrint('_loadStocks error: $e');
+    }
+  }
+
+  Future<void> _saveStocks() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final list = _stocks.values.map((s) => {'code': s.code, 'name': s.name}).toList();
+      await prefs.setString(_kKey, jsonEncode(list));
+    } catch (e) {
+      debugPrint('_saveStocks error: $e');
+    }
   }
 
   /// 开始监控：启动轮询（内部使用，无需外部调用）
@@ -91,6 +127,7 @@ class StockProvider extends ChangeNotifier {
     if (!_stocks.containsKey(code)) {
       _stocks[code] = Stock(code: code, name: name);
       _ensureWatchRunning();
+      _saveStocks();
       notifyListeners();
     }
   }
@@ -99,6 +136,7 @@ class StockProvider extends ChangeNotifier {
     _stocks.remove(code);
     if (_stocks.isEmpty) {
       stopWatch();
+      _saveStocks();
     } else {
       _ensureWatchRunning();
     }
@@ -170,16 +208,23 @@ class StockProvider extends ChangeNotifier {
 
   /// 定时播报：按间隔播报所有股票
   Future<void> _reportAll() async {
-    if (_speaking || _stocks.isEmpty) return;
+    if (_stocks.isEmpty) return;
+    // 重置 speaking 状态，允许新的播报请求进来（即使上一次未完成）
+    _speaking = false;
     _speaking = true;
     try {
       for (final s in _stocks.values) {
-        if (s.price <= 0) continue;
+        if (s.price <= 0) {
+          debugPrint('TTS skip ${s.name}: price=${s.price} (数据未就绪)');
+          continue;
+        }
         final dir = s.changePct >= 0 ? '涨' : '跌';
         final text = '${s.name}，报${s.price.toStringAsFixed(2)}元，$dir${s.changePct.abs().toStringAsFixed(2)}%';
         await _speakAndNotify(text, AlertType.selfQuote);
         await Future.delayed(const Duration(milliseconds: 800));
       }
+    } catch (e) {
+      debugPrint('TTS _reportAll error: $e');
     } finally {
       _speaking = false;
     }
