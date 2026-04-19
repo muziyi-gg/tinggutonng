@@ -92,7 +92,7 @@ class _TtsDebugScreenState extends State<TtsDebugScreen> {
           _row('平台', '${_testTts.initDone ? (_testTts.langAvailable >= 0 ? 'Android' : 'iOS') : '未知'}'),
           _row('当前状态', _testTts.state.name),
           _row('TTS 语言', _testTts.currentLanguage),
-          _row('语言可用', _testTts.langAvailable >= 1 ? '✅ 可用' : '❌ 不可用 ($_testTts.langAvailable)'),
+          _row('语言可用', _testTts.langAvailable >= 1 ? '✅ 可用' : '❌ 不可用 (${_testTts.langAvailable})'),
           if (_testTts.availableEngines.isNotEmpty)
             _row('可用引擎', _testTts.availableEngines.join(', ')),
           if (_testTts.lastPlatformCode != null)
