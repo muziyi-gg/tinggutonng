@@ -4,53 +4,75 @@ import 'package:http/http.dart' as http;
 import '../models/stock.dart';
 import '../models/alert_type.dart';
 
-/// 腾讯行情 API 服务
-/// 直接调用 qt.gtimg.cn，全量字段解析，不做本地运算
+/// 新浪行情 API 服务（HTTPS）
+/// 直接调用 hq.sinajs.cn，返回 GBK/GB18030 编码
 class StockApiService {
-  static const String _baseUrl = 'https://qt.gtimg.cn';
+  static const String _baseUrl = 'https://hq.sinajs.cn';
 
   /// 批量获取股票行情（最多50只）
   Future<Map<String, StockRaw>> fetchQuotes(List<String> codes) async {
     if (codes.isEmpty) return {};
-    final uri = Uri.parse('$_baseUrl/q=${codes.join(",")}');
+    final uri = Uri.parse('$_baseUrl/list=${codes.join(",")}');
     final resp = await http.get(
       uri,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-        'Referer': 'https://gu.qq.com/',
+        'Referer': 'https://finance.sina.com.cn/',
       },
     ).timeout(const Duration(seconds: 3));
 
     if (resp.statusCode != 200) return {};
-    return _parseQtResponse(utf8.decode(resp.bodyBytes));
+    // 新浪返回 GBK/GB18030 编码
+    return _parseSinaResponse(_decodeGbk(resp.bodyBytes));
   }
 
-  /// 解析腾讯行情 v_pakt 格式
-  Map<String, StockRaw> _parseQtResponse(String raw) {
+  /// 解析新浪 hq_str_{code}="name,price,prevClose,open,vol,... 时间" 格式
+  Map<String, StockRaw> _parseSinaResponse(String raw) {
     final Map<String, StockRaw> result = {};
-    final re = RegExp(r'v_(\w+)="([^"]+)"');
+    final re = RegExp(r'hq_str_(\w+)="([^"]+)"');
     for (final m in re.allMatches(raw)) {
       final code = m[1]!;
-      final f = m[2]!.split('~');
-      if (f.length < 40) continue;
+      final f = m[2]!.split(',');
+      if (f.length < 32) continue;
+      final price = double.tryParse(f[1]) ?? 0;
+      final prevClose = double.tryParse(f[2]) ?? 0;
+      final change = prevClose > 0 ? price - prevClose : 0.0;
+      final changePct = prevClose > 0 ? (change / prevClose) * 100 : 0.0;
+      final open = double.tryParse(f[3]) ?? 0;
+      final vol = double.tryParse(f[4]) ?? 0;
+      final high = double.tryParse(f[5]) ?? 0;
+      final low = double.tryParse(f[6]) ?? 0;
+      // f[30] = 日期, f[31] = 时间
+      final ts = (f.length > 31 && f[30].isNotEmpty)
+          ? '${f[30]} ${f[31]}'
+          : DateTime.now().toIso8601String();
       result[code] = StockRaw(
         code: code,
-        name: f[1] ?? code,
-        price: double.tryParse(f[3]) ?? 0,
-        prevClose: double.tryParse(f[4]) ?? 0,
-        open: double.tryParse(f[5]) ?? 0,
-        volume: double.tryParse(f[6]) ?? 0,       // 成交量（手）
-        bid1: double.tryParse(f[9]) ?? 0,          // 买一价
-        ask1: double.tryParse(f[19]) ?? 0,         // 卖一价
-        change: double.tryParse(f[31]) ?? 0,       // 涨跌额
-        changePct: double.tryParse(f[32]) ?? 0,   // 涨跌幅%
-        high: double.tryParse(f[33]) ?? 0,        // 最高
-        low: double.tryParse(f[34]) ?? 0,         // 最低
-        // f[36] = 今开, f[38] = 昨量
-        timestamp: f[30].isNotEmpty ? f[30] : DateTime.now().toIso8601String(),
+        name: f[0] ?? code,
+        price: price,
+        prevClose: prevClose,
+        open: open,
+        volume: vol,
+        bid1: 0,
+        ask1: 0,
+        change: change,
+        changePct: changePct,
+        high: high,
+        low: low,
+        timestamp: ts,
       );
     }
     return result;
+  }
+
+  /// GBK/GB18030 解码
+  String _decodeGbk(List<int> bytes) {
+    try {
+      return latin1.decode(bytes);
+    } catch (_) {
+      final safe = bytes.map((b) => b < 256 ? b : 63).toList();
+      return latin1.decode(safe);
+    }
   }
 }
 

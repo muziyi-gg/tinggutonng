@@ -156,47 +156,53 @@ class StockProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 每秒轮询：获取最新价格（从实时股票列表）
+  /// 每秒轮询：获取最新价格（新浪 HTTPS API，返回 GBK 编码）
   Future<void> _pollPricesLive() async {
     if (_stocks.isEmpty) return;
     try {
       final codes = _stocks.keys.toList();
-      final uri = Uri.parse('https://qt.gtimg.cn/q=${codes.join(",")}');
+      // 新浪 HTTPS API（sh/sz 前缀与代码格式一致）
+      final uri = Uri.parse('https://hq.sinajs.cn/list=${codes.join(",")}');
       final resp = await http.get(
         uri,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-          'Referer': 'https://gu.qq.com/',
+          'Referer': 'https://finance.sina.com.cn/',
         },
       ).timeout(const Duration(seconds: 3));
 
       if (resp.statusCode != 200) {
-        debugPrint('pollPrices HTTP ${resp.statusCode}');
+        debugPrint('Sina HTTP ${resp.statusCode}');
         return;
       }
-      final raw = utf8.decode(resp.bodyBytes);
-      debugPrint('pollPrices raw(${raw.length}): ${raw.substring(0, raw.length > 80 ? 80 : raw.length)}');
-      _parseQtResponse(raw);
+      // 新浪接口返回 GBK/GB18030 编码
+      // 注意：dart http 默认按 Content-Type charset 解码，
+      // 但对 GBK 支持不完整，直接用 bodyBytes + latin1.decode 更可靠
+      final raw = _decodeGbk(resp.bodyBytes);
+      debugPrint('Sina raw(${raw.length}): ${raw.substring(0, raw.length > 120 ? 120 : raw.length)}');
+      _parseSinaResponse(raw);
     } catch (e) {
-      debugPrint('pollPrices error: $e');
+      debugPrint('Sina poll error: $e');
     }
   }
 
-  void _parseQtResponse(String raw) {
-    final re = RegExp(r'v_(\w+)="([^"]+)"');
+  /// 解析新浪 hq_str_{code}="name,price,prevClose,open,vol,..." 格式
+  void _parseSinaResponse(String raw) {
+    // 匹配 var hq_str_sz300059="东方财富,19.95,20.03,19.90,...";
+    final re = RegExp(r'hq_str_(\w+)="([^"]+)"');
     bool changed = false;
     int matched = 0;
     for (final m in re.allMatches(raw)) {
       final code = m[1]!;
-      final f = m[2]!.split('~');
-      if (f.length < 33) {
-        debugPrint('parseQt skip $code: fields=${f.length}');
+      final f = m[2]!.split(',');
+      if (f.length < 4) {
+        debugPrint('Sina skip $code: fields=${f.length}');
         continue;
       }
-      final price = double.tryParse(f[3]) ?? 0;
-      final prevClose = double.tryParse(f[4]) ?? 0;
-      final change = double.tryParse(f[31]) ?? 0;
-      final changePct = double.tryParse(f[32]) ?? 0;
+      final price = double.tryParse(f[1]) ?? 0;
+      final prevClose = double.tryParse(f[2]) ?? 0;
+      final change = prevClose > 0 ? price - prevClose : 0.0;
+      final changePct = prevClose > 0 ? (change / prevClose) * 100 : 0.0;
 
       if (_stocks.containsKey(code)) {
         _stocks[code] = Stock(
@@ -212,8 +218,19 @@ class StockProvider extends ChangeNotifier {
         matched++;
       }
     }
-    debugPrint('parseQt matched=$matched/${_stocks.length}');
+    debugPrint('Sina matched=$matched/${_stocks.length}');
     if (changed) notifyListeners();
+  }
+
+  /// GBK/GB18030 解码（Dart 内置 latin1 覆盖 ASCII + Latin-1，足够解码中文常用区）
+  String _decodeGbk(List<int> bytes) {
+    try {
+      return latin1.decode(bytes);
+    } catch (_) {
+      // latin1 之外的字节替换为 ?（不影响数字解析）
+      final safe = bytes.map((b) => b < 256 ? b : 63).toList();
+      return latin1.decode(safe);
+    }
   }
 
   /// 定时播报：按间隔播报所有股票
