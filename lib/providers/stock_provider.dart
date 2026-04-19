@@ -27,12 +27,14 @@ class StockProvider extends ChangeNotifier {
   bool _isPolling = false;
   int _reportIntervalSec = 60; // 默认60秒播报一次
 
-  // 播报开关（用户按按钮开启/关闭，true=循环播报已启用）
+  /// 播报开关（用户按按钮开启/关闭循环播报）
+  /// true = 循环播报运行中（定时器活跃）
+  /// false = 播报停止
   bool _speaking = false;
-  // 标记当前是否正在执行播报（单次循环内，防止重叠）
+  /// 标记当前是否正在执行播报（单次循环内，防止重叠）
   bool _isReporting = false;
 
-  // 当前错误（UI 层负责展示和清除）
+  /// 当前错误（UI 层负责展示和清除）
   ReportError? _lastError;
 
   Map<String, Stock> get stocks => _stocks;
@@ -139,10 +141,13 @@ class StockProvider extends ChangeNotifier {
   }
 
   /// 开启循环播报（用户按播放按钮）
+  /// 定时器按 _reportIntervalSec 间隔触发，播完一轮后等下一轮
   void startReport() {
     if (_speaking) return; // 已在播报中
     _speaking = true;
     _reportTimer?.cancel();
+    // 立即播一次，然后按间隔循环
+    _reportAll(); // 异步，不阻塞
     _reportTimer = Timer.periodic(
       Duration(seconds: _reportIntervalSec),
       (_) => _reportAll(),
@@ -164,63 +169,71 @@ class StockProvider extends ChangeNotifier {
   }
 
 
-  /// 每秒轮询：获取最新价格（新浪 HTTP API，返回 GBK 编码）
+  /// 每秒轮询：获取最新价格（腾讯 HTTP API，返回 UTF-8）
+  /// v_{code}="1~名称~代码~现价~昨收~今开~成交量~外盘~内盘~买一价~买一量~
+  ///        买一价~买一量~... ~时间(YYYYMMDDHHMMSS)~涨跌~涨跌幅%~最高~最低~..."
   Future<void> _pollPricesLive() async {
     if (_stocks.isEmpty) return;
     final codes = _stocks.keys.toList();
-    final url = 'http://hq.sinajs.cn/list=${codes.join(",")}';
+    final url = 'https://qt.gtimg.cn/q=${codes.join(",")}';
     try {
       final r = await http.get(
         Uri.parse(url),
-        headers: {'Referer': 'http://finance.sina.com.cn', 'Accept': '*/*'},
+        headers: {
+          'Referer': 'https://gu.qq.com',
+          'Accept': '*/*',
+        },
       ).timeout(const Duration(seconds: 8));
       if (r.statusCode == 200) {
-        // GBK decode
-        final text = _decodeGbk(r.bodyBytes);
-        _parseSinaResponse(text);
+        _parseTencentResponse(r.body);
       }
     } catch (e) {
       debugPrint('Poll error: $e');
     }
   }
 
-  /// GBK/GB18030 解码
-  /// vnall 字段（逗号分隔，从0计）：
-  /// f[0]=代码 f[1]=名称 f[2]=现价 f[3]=昨收 f[4]=今开 f[5]=成交量
-  /// f[6]=外盘 f[7]=内盘 f[8]=买一价 f[9]=买一量 ... f[17]=时间戳
-  /// f[19]=涨跌额 f[20]=涨跌% f[21]=最高 f[22]=最低
-  /// f[30]=市值 f[31]=市盈率 f[32]=换手率 f[33]=振幅
-  void _parseSinaResponse(String raw) {
-    final re = RegExp(r'hq_str_(\w+)="([^"]+)"');
+  /// 解析腾讯 v_{code}="1~名称~代码~现价~昨收~今开~...~时间~涨跌~涨跌幅%~最高~最低~..." 格式
+  /// 字段（~分隔，从0计）：
+  /// f[0]=固定1  f[1]=名称  f[2]=代码  f[3]=现价  f[4]=昨收  f[5]=今开
+  /// f[6]=成交量  f[7]=外盘  f[8]=内盘  f[31]=时间戳(YYYYMMDDHHMMSS)
+  /// f[32]=涨跌额  f[33]=涨跌幅%  f[34]=最高  f[35]=最低
+  void _parseTencentResponse(String raw) {
+    final re = RegExp(r'v_(\w+)="([^"]+)"');
     bool changed = false;
     int matched = 0;
     for (final m in re.allMatches(raw)) {
       final code = m[1]!;
-      final f = m[2]!.split(',');
-      if (f.length < 32) {
-        debugPrint('Sina skip $code: fields=${f.length}');
+      final f = m[2]!.split('~');
+      if (f.length < 36) {
+        debugPrint('Tencent skip $code: fields=${f.length}');
         continue;
       }
-      // 取接口直接返回的现价/涨跌额/涨跌幅，不自行计算
-      final price    = double.tryParse(f[2])  ?? 0; // 现价
-      final prevClose = double.tryParse(f[3])  ?? 0; // 昨收
-      final openPrice = double.tryParse(f[4])  ?? 0; // 今开
-      final change    = double.tryParse(f[19]) ?? 0; // 涨跌额（接口直接返回）
-      final changePct = double.tryParse(f[20]) ?? 0; // 涨跌幅%（接口直接返回）
+      final price     = double.tryParse(f[3])  ?? 0; // 现价
+      final prevClose = double.tryParse(f[4])  ?? 0; // 昨收
+      final openPrice = double.tryParse(f[5])  ?? 0; // 今开
+      final change     = double.tryParse(f[32]) ?? 0; // 涨跌额
+      final changePct  = double.tryParse(f[33]) ?? 0; // 涨跌幅%
 
-      // 解析时间戳 f[17]：Unix 秒
+      // 解析时间戳 f[31]：格式 YYYYMMDDHHMMSS
       DateTime? serverTime;
       DateTime? tradeDate;
-      if (f[17].isNotEmpty) {
+      if (f[31].length >= 14) {
         try {
-          final ts = int.tryParse(f[17]) ?? 0;
-          serverTime = DateTime.fromMillisecondsSinceEpoch(ts * 1000, isUtc: true)
-              .toLocal();
-          tradeDate = DateTime(serverTime.year, serverTime.month, serverTime.day);
+          final y = int.parse(f[31].substring(0, 4));
+          final mon = int.parse(f[31].substring(4, 6));
+          final d = int.parse(f[31].substring(6, 8));
+          final h = int.parse(f[31].substring(8, 10));
+          final mi = int.parse(f[31].substring(10, 12));
+          final s = int.parse(f[31].substring(12, 14));
+          serverTime = DateTime(y, mon, d, h, mi, s);
+          tradeDate = DateTime(y, mon, d);
         } catch (_) {
           serverTime = DateTime.now();
           tradeDate = DateTime.now();
         }
+      } else {
+        serverTime = DateTime.now();
+        tradeDate = DateTime.now();
       }
 
       if (_stocks.containsKey(code)) {
@@ -239,19 +252,8 @@ class StockProvider extends ChangeNotifier {
         matched++;
       }
     }
-    debugPrint('Sina matched=$matched/${_stocks.length}');
+    debugPrint('Tencent matched=$matched/${_stocks.length}');
     if (changed) notifyListeners();
-  }
-
-  /// GBK/GB18030 解码（Dart 内置 latin1 覆盖 ASCII + Latin-1，足够解码中文常用区）
-  String _decodeGbk(List<int> bytes) {
-    try {
-      return latin1.decode(bytes);
-    } catch (_) {
-      // latin1 之外的字节替换为 ?（不影响数字解析）
-      final safe = bytes.map((b) => b < 256 ? b : 63).toList();
-      return latin1.decode(safe);
-    }
   }
 
   /// 定时播报：按间隔循环播报所有股票，直到用户关闭
