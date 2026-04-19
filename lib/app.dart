@@ -8,8 +8,31 @@ import 'screens/stock_list_screen.dart';
 import 'screens/monitor_settings_screen.dart';
 import 'screens/tts_debug_screen.dart';
 
-class TingutongApp extends StatelessWidget {
+class TingutongApp extends StatefulWidget {
   const TingutongApp({super.key});
+  @override
+  State<TingutongApp> createState() => _TingutongAppState();
+}
+
+class _TingutongAppState extends State<TingutongApp> {
+  late StockProvider _stockProvider;
+  bool _initialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _stockProvider = StockProvider();
+    _stockProvider.init().then((_) {
+      if (mounted) setState(() => _initialized = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _stockProvider.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext ctx) {
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
@@ -18,9 +41,19 @@ class TingutongApp extends StatelessWidget {
       systemNavigationBarColor: Colors.white,
       systemNavigationBarIconBrightness: Brightness.dark,
     ));
+
+    if (!_initialized) {
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: const Scaffold(
+          body: Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
+
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => StockProvider()..init()),
+        ChangeNotifierProvider.value(value: _stockProvider),
         ChangeNotifierProvider(create: (_) => ConfigProvider()),
       ],
       child: MaterialApp(

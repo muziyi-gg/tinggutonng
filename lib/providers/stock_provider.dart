@@ -48,7 +48,7 @@ class StockProvider extends ChangeNotifier {
   Future<void> init() async {
     await _tts.init();
     await _notif.init();
-    // 从本地存储恢复自选股
+    // 从本地存储恢复自选股（必须等待完成，防止竞态）
     await _loadStocks();
     notifyListeners();
   }
@@ -213,9 +213,11 @@ class StockProvider extends ChangeNotifier {
     _speaking = false;
     _speaking = true;
     try {
+      bool anySkipped = false;
       for (final s in _stocks.values) {
         if (s.price <= 0) {
           debugPrint('TTS skip ${s.name}: price=${s.price} (数据未就绪)');
+          anySkipped = true;
           continue;
         }
         final dir = s.changePct >= 0 ? '涨' : '跌';
@@ -223,10 +225,16 @@ class StockProvider extends ChangeNotifier {
         await _speakAndNotify(text, AlertType.selfQuote);
         await Future.delayed(const Duration(milliseconds: 800));
       }
+      // 所有股票价格都是0，说明行情未拉到
+      if (anySkipped && _stocks.values.every((s) => s.price <= 0)) {
+        _lastError = ReportError('行情数据未就绪，请检查网络后重试');
+        notifyListeners();
+      }
     } catch (e) {
       debugPrint('TTS _reportAll error: $e');
     } finally {
       _speaking = false;
+      notifyListeners(); // 确保 UI 始终收到状态更新
     }
   }
 
