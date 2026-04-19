@@ -2,10 +2,11 @@
 class Stock {
   final String code; // 腾讯格式: sh600519
   final String name;
-  double price; // 当前价
+  double price; // 当前价（bid实时买入价）
   double prevClose; // 昨收
   double change; // 涨跌额
   double changePct; // 涨跌幅%
+  double openPrice; // 开盘价
   DateTime lastUpdate;
   int reportIntervalSec; // 播报间隔(秒): 30/60/300
   bool enabled; // 是否启用播报
@@ -18,6 +19,7 @@ class Stock {
     this.prevClose = 0,
     this.change = 0,
     this.changePct = 0,
+    this.openPrice = 0,
     DateTime? lastUpdate,
     this.reportIntervalSec = 60,
     this.enabled = true,
@@ -85,6 +87,7 @@ class Stock {
     double? prevClose,
     double? change,
     double? changePct,
+    double? openPrice,
     DateTime? lastUpdate,
     int? reportIntervalSec,
     bool? enabled,
@@ -97,6 +100,7 @@ class Stock {
       prevClose: prevClose ?? this.prevClose,
       change: change ?? this.change,
       changePct: changePct ?? this.changePct,
+      openPrice: openPrice ?? this.openPrice,
       lastUpdate: lastUpdate ?? this.lastUpdate,
       reportIntervalSec: reportIntervalSec ?? this.reportIntervalSec,
       enabled: enabled ?? this.enabled,

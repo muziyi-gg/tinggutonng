@@ -202,9 +202,14 @@ class StockProvider extends ChangeNotifier {
         debugPrint('Sina skip $code: fields=${f.length}');
         continue;
       }
-      final price = double.tryParse(f[1]) ?? 0;
+      // 新浪字段: f[1]=参考价(非实时), f[2]=昨收, f[3]=今开, f[6]=bid实时买入价
+      // 对于涨跌：当前价用bid(f[6])，昨收用f[2]，计算涨跌额和涨跌幅
       final prevClose = double.tryParse(f[2]) ?? 0;
-      final change = prevClose > 0 ? price - prevClose : 0.0;
+      final price = double.tryParse(f[6]) ?? 0;
+      final openPrice = double.tryParse(f[3]) ?? 0;
+      // 如果bid价格为0（可能停牌或数据未刷新），降级使用f[1]参考价
+      final effectivePrice = price > 0 ? price : (double.tryParse(f[1]) ?? 0);
+      final change = prevClose > 0 ? effectivePrice - prevClose : 0.0;
       final changePct = prevClose > 0 ? (change / prevClose) * 100 : 0.0;
 
       // 解析服务器时间：f[30]=日期(YYYY-MM-DD), f[31]=时间(HH:MM:SS)
@@ -225,10 +230,11 @@ class StockProvider extends ChangeNotifier {
         _stocks[code] = Stock(
           code: code,
           name: _stocks[code]!.name,
-          price: price,
+          price: effectivePrice,
           prevClose: prevClose,
           change: change,
           changePct: changePct,
+          openPrice: openPrice,
           lastUpdate: serverTime ?? DateTime.now(),
           tradeDate: tradeDate ?? DateTime.now(),
         );

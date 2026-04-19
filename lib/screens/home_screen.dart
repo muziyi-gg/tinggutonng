@@ -22,9 +22,10 @@ class HomeScreen extends StatelessWidget {
   }
 
   Widget _buildHeader(BuildContext ctx) {
-    final sp = Provider.of<StockProvider>(ctx);
-    final isSpeaking = sp.isSpeaking;
-    return Container(
+    return Consumer<StockProvider>(
+      builder: (ctx, sp, _) {
+        final isSpeaking = sp.isSpeaking;
+        return Container(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
       decoration: const BoxDecoration(color: Colors.white),
       child: Row(children: [
@@ -56,16 +57,27 @@ class HomeScreen extends StatelessWidget {
           ),
       ]),
     );
+      },
+    );
   }
 
   Widget _buildBody(BuildContext ctx) {
-    final sp = Provider.of<StockProvider>(ctx);
+    // listen:false 避免 Provider.of 订阅所有 notifyListeners 触发无关重建
+    final sp = Provider.of<StockProvider>(ctx, listen: false);
     final stocks = sp.stockList;
-    final alerts = sp.recentAlerts;
 
     return CustomScrollView(slivers: [
-      if (alerts.isNotEmpty)
-        SliverToBoxAdapter(child: _AlertBanner(alert: alerts.first)),
+      // Consumer 只订阅 recentAlerts，自选股/设置列表不受播报状态影响
+      Consumer<StockProvider>(
+        builder: (ctx, sp, _) => SliverToBoxAdapter(
+          child: sp.recentAlerts.isNotEmpty
+              ? ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 72),
+                  child: _AlertBanner(alert: sp.recentAlerts.first),
+                )
+              : const SizedBox.shrink(),
+        ),
+      ),
       SliverToBoxAdapter(child: _sectionTitle('我的自选', onSeeAll: onNavigateStocks)),
       if (stocks.isEmpty)
         const SliverToBoxAdapter(child: _EmptyState())
@@ -83,18 +95,24 @@ class HomeScreen extends StatelessWidget {
           ),
         ),
       SliverToBoxAdapter(child: _buildMonitorEntry()),
-      if (alerts.isNotEmpty) ...[
-        SliverToBoxAdapter(child: _sectionTitle('最近播报')),
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
-          sliver: SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (ctx, i) => _AlertListItem(alert: alerts[i]),
-              childCount: alerts.length > 10 ? 10 : alerts.length,
+      Consumer<StockProvider>(
+        builder: (ctx, sp, _) {
+          final alerts = sp.recentAlerts;
+          if (alerts.isEmpty) return const SliverToBoxAdapter(child: SizedBox.shrink());
+          return SliverMainAxisGroup(slivers: [
+            SliverToBoxAdapter(child: _sectionTitle('最近播报')),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (ctx, i) => _AlertListItem(alert: alerts[i]),
+                  childCount: alerts.length > 10 ? 10 : alerts.length,
+                ),
+              ),
             ),
-          ),
-        ),
-      ],
+          ]);
+        },
+      ),
     ]);
   }
 
