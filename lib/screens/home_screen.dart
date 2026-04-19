@@ -38,7 +38,7 @@ class HomeScreen extends StatelessWidget {
           tooltip: 'TTS调试',
         ),
         // 播报中显示停止按钮，否则显示播放按钮
-        if (isSpeaking)
+        if (sp.isSpeaking)
           IconButton(
             onPressed: () => _handleStop(ctx),
             icon: const Icon(Icons.stop_circle, color: Color(0xFFFF9500), size:28),

@@ -43,15 +43,25 @@ class StockCard extends StatelessWidget {
         Column(crossAxisAlignment:CrossAxisAlignment.end, children: [
           Text('¥${stock.price.toStringAsFixed(2)}',
               style: TextStyle(fontSize:16, fontWeight:FontWeight.bold, color:color)),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal:6, vertical:2),
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(4),
+          if (stock.isClosed)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal:5, vertical:2),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE8E8F0),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Text('收盘', style: TextStyle(fontSize:10, fontWeight:FontWeight.w600, color:Color(0xFF9999AA))),
+            )
+          else
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal:6, vertical:2),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text('$arrow ${stock.changePct.abs().toStringAsFixed(2)}%',
+                  style: TextStyle(fontSize:12, fontWeight:FontWeight.w600, color:color)),
             ),
-            child: Text('$arrow ${stock.changePct.abs().toStringAsFixed(2)}%',
-                style: TextStyle(fontSize:12, fontWeight:FontWeight.w600, color:color)),
-          ),
         ]),
       ]),
     );

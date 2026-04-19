@@ -67,7 +67,7 @@ class StockProvider extends ChangeNotifier {
       for (final item in list) {
         final code = item['code'] as String;
         final name = item['name'] as String;
-        _stocks[code] = Stock(code: code, name: name);
+        _stocks[code] = Stock(code: code, name: name, tradeDate: DateTime.now());
       }
       if (_stocks.isNotEmpty) {
         _ensureWatchRunning();
@@ -128,7 +128,7 @@ class StockProvider extends ChangeNotifier {
 
   void addStock(String code, String name) {
     if (!_stocks.containsKey(code)) {
-      _stocks[code] = Stock(code: code, name: name);
+      _stocks[code] = Stock(code: code, name: name, tradeDate: DateTime.now());
       _ensureWatchRunning();
       _saveStocks();
       notifyListeners();
@@ -209,12 +209,15 @@ class StockProvider extends ChangeNotifier {
 
       // 解析服务器时间：f[30]=日期(YYYY-MM-DD), f[31]=时间(HH:MM:SS)
       DateTime? serverTime;
+      DateTime? tradeDate;
       if (f[30].isNotEmpty && f[31].isNotEmpty) {
         try {
           final dateStr = '${f[30]} ${f[31]}';
           serverTime = DateTime.parse(dateStr.replaceFirst(' ', 'T'));
+          tradeDate = DateTime.parse(f[30]); // 纯日期部分
         } catch (_) {
           serverTime = DateTime.now();
+          tradeDate = DateTime.now();
         }
       }
 
@@ -227,6 +230,7 @@ class StockProvider extends ChangeNotifier {
           change: change,
           changePct: changePct,
           lastUpdate: serverTime ?? DateTime.now(),
+          tradeDate: tradeDate ?? DateTime.now(),
         );
         changed = true;
         matched++;
@@ -316,20 +320,14 @@ class StockProvider extends ChangeNotifier {
   }
 
   /// 手动播报（首页按钮触发）
-  /// 返回错误信息供 UI 弹窗使用
+  /// 播放/暂停只控制声音，不影响界面状态
   Future<ReportError?> reportAllStocks() async {
-    if (_speaking) {
-      _lastError = ReportError('正在播报中，请稍候...');
-      notifyListeners();
-      return _lastError;
-    }
     if (_stocks.isEmpty) {
       _lastError = ReportError('请先添加自选股');
       notifyListeners();
       return _lastError;
     }
     await _reportAll();
-    // 如果 _reportAll 中 TTS 失败，_lastError 会被设置
     return _lastError;
   }
 

@@ -9,6 +9,7 @@ class Stock {
   DateTime lastUpdate;
   int reportIntervalSec; // 播报间隔(秒): 30/60/300
   bool enabled; // 是否启用播报
+  DateTime tradeDate; // 行情数据所属的服务器交易日期（用于判断收盘状态）
 
   Stock({
     required this.code,
@@ -20,7 +21,9 @@ class Stock {
     DateTime? lastUpdate,
     this.reportIntervalSec = 60,
     this.enabled = true,
-  }) : lastUpdate = lastUpdate ?? DateTime.now();
+    DateTime? tradeDate,
+  })  : lastUpdate = lastUpdate ?? DateTime.now(),
+        tradeDate = tradeDate ?? DateTime.now();
 
   /// 涨停价（主板±10%，科创/创业±20%）
   double get limitUpPrice {
@@ -60,6 +63,14 @@ class Stock {
   /// 是否跌停
   bool get isLimitDown => price <= limitDownPrice && price > 0;
 
+  /// 是否已收盘（数据日期非今日）
+  bool get isClosed => !_isToday(tradeDate);
+
+  static bool _isToday(DateTime d) {
+    final now = DateTime.now();
+    return d.year == now.year && d.month == now.month && d.day == now.day;
+  }
+
   /// 格式化涨跌幅显示
   String get changePctDisplay =>
       '${changePct >= 0 ? '+' : ''}${changePct.toStringAsFixed(2)}%';
@@ -77,6 +88,7 @@ class Stock {
     DateTime? lastUpdate,
     int? reportIntervalSec,
     bool? enabled,
+    DateTime? tradeDate,
   }) {
     return Stock(
       code: code ?? this.code,
@@ -88,6 +100,7 @@ class Stock {
       lastUpdate: lastUpdate ?? this.lastUpdate,
       reportIntervalSec: reportIntervalSec ?? this.reportIntervalSec,
       enabled: enabled ?? this.enabled,
+      tradeDate: tradeDate ?? this.tradeDate,
     );
   }
 }
