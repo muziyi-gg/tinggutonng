@@ -163,28 +163,19 @@ class StockProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 每秒轮询：获取最新价格（新浪 HTTPS API，返回 GBK 编码）
-  Future<void> _pollPricesLive() async {
-    if (_stocks.isEmpty) return;
-    try {
-      final codes = _stocks.keys.toList();
-      // 新浪 HTTPS API（sh/sz 前缀与代码格式一致）
-      final uri = Uri.parse('https://hq.sinajs.cn/list=${codes.join(",")}');
-      final resp = await http.get(
-        uri,
-        headers: {
-  /// 拉取实时价格：新浪 vnall (GBK)，直接返回现价/涨跌额/涨跌幅
-  /// 每秒一次，股票数量少时足够。
+
+  /// 每秒轮询：获取最新价格（新浪 HTTP API，返回 GBK 编码）
   Future<void> _pollPricesLive() async {
     if (_stocks.isEmpty) return;
     final codes = _stocks.keys.toList();
     final url = 'http://hq.sinajs.cn/list=${codes.join(",")}';
     try {
-      final r = await _http.get(
+      final r = await http.get(
         Uri.parse(url),
         headers: {'Referer': 'http://finance.sina.com.cn', 'Accept': '*/*'},
       ).timeout(const Duration(seconds: 8));
       if (r.statusCode == 200) {
+        // GBK decode
         final text = _decodeGbk(r.bodyBytes);
         _parseSinaResponse(text);
       }
@@ -193,8 +184,8 @@ class StockProvider extends ChangeNotifier {
     }
   }
 
-  /// 解析新浪 hq_str_{code}="name,f2,f3,f4,f5,f6... 日期,时间" 格式
-  /// vnall 字段（f 为逗号分隔数组下标，从0计）：
+  /// GBK/GB18030 解码
+  /// vnall 字段（逗号分隔，从0计）：
   /// f[0]=代码 f[1]=名称 f[2]=现价 f[3]=昨收 f[4]=今开 f[5]=成交量
   /// f[6]=外盘 f[7]=内盘 f[8]=买一价 f[9]=买一量 ... f[17]=时间戳
   /// f[19]=涨跌额 f[20]=涨跌% f[21]=最高 f[22]=最低
