@@ -7,7 +7,8 @@ import '../widgets/live_status_indicator.dart';
 class HomeScreen extends StatelessWidget {
   final VoidCallback onNavigateStocks;
   final VoidCallback onNavigateSettings;
-  const HomeScreen({super.key, required this.onNavigateStocks, required this.onNavigateSettings});
+  final VoidCallback onNavigateDebug;
+  const HomeScreen({super.key, required this.onNavigateStocks, required this.onNavigateSettings, required this.onNavigateDebug});
 
   @override
   Widget build(BuildContext ctx) {
@@ -30,6 +31,11 @@ class HomeScreen extends StatelessWidget {
         const SizedBox(width:8),
         LiveStatusIndicator(polling: sp.isPolling),
         const Spacer(),
+        IconButton(
+          onPressed: onNavigateDebug,
+          icon: const Icon(Icons.bug_report_outlined, color: Color(0xFF666687), size:22),
+          tooltip: 'TTS调试',
+        ),
         IconButton(
           onPressed: () => _handleReport(ctx),
           icon: const Icon(Icons.play_circle_fill, color: Color(0xFFE84057), size:28),

@@ -6,6 +6,7 @@ import 'providers/config_provider.dart';
 import 'screens/home_screen.dart';
 import 'screens/stock_list_screen.dart';
 import 'screens/monitor_settings_screen.dart';
+import 'screens/tts_debug_screen.dart';
 
 class TingutongApp extends StatelessWidget {
   const TingutongApp({super.key});
@@ -62,6 +63,12 @@ class _MainNavigatorState extends State<_MainNavigator> {
       MaterialPageRoute(builder:(_)=> const MonitorSettingsScreen()),
     );
   }
+  void _navigateToDebug() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder:(_)=> const TtsDebugScreen()),
+    );
+  }
 
   @override
   Widget build(BuildContext ctx) {
@@ -72,6 +79,7 @@ class _MainNavigatorState extends State<_MainNavigator> {
           HomeScreen(
             onNavigateStocks: _navigateToStocks,
             onNavigateSettings: _navigateToSettings,
+            onNavigateDebug: _navigateToDebug,
           ),
           const StockListScreen(),
         ],
