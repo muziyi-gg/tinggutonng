@@ -11,9 +11,11 @@ import '../models/stock.dart';
 ///   [4]  昨收价
 ///   [5]  今日开盘价
 ///   [6]  成交量（手）
+///   [30] 日期时间戳 YYYYMMDDHHMMSS
 ///   [31] 涨跌额（带符号，正负）
 ///   [32] 涨跌幅%（带符号，正负，直接可用）
-///   [30] 日期时间戳 YYYYMMDDHHMMSS
+///   [33] 最高价
+///   [34] 最低价
 class StockApiService {
   /// 批量获取股票行情（最多50只）
   Future<Map<String, StockRaw>> fetchQuotes(List<String> codes) async {
@@ -44,11 +46,11 @@ class StockApiService {
       final prev   = double.tryParse(f[4]) ?? 0.0;
       final open   = double.tryParse(f[5]) ?? 0.0;
       final vol    = double.tryParse(f[6]) ?? 0.0;
-      final high   = double.tryParse(f[33]) ?? 0.0;
-      final low    = double.tryParse(f[34]) ?? 0.0;
+      final high   = double.tryParse(f[41]) ?? 0.0; // 最高（真实 f[41]）
+      final low    = double.tryParse(f[34]) ?? 0.0;  // 最低
       // 涨跌额和涨跌幅直接来自 API，无需自行计算
-      final change    = double.tryParse(f[31]) ?? 0.0;
-      final changePct = double.tryParse(f[32]) ?? 0.0;
+      final change    = double.tryParse(f[31]) ?? 0.0; // 涨跌额
+      final changePct = double.tryParse(f[32]) ?? 0.0; // 涨跌幅%
       final ts       = f[30].isNotEmpty ? f[30] : '';
 
       result[code] = StockRaw(
