@@ -170,21 +170,29 @@ class StockProvider extends ChangeNotifier {
         },
       ).timeout(const Duration(seconds: 3));
 
-      if (resp.statusCode != 200) return;
+      if (resp.statusCode != 200) {
+        debugPrint('pollPrices HTTP ${resp.statusCode}');
+        return;
+      }
       final raw = utf8.decode(resp.bodyBytes);
+      debugPrint('pollPrices raw(${raw.length}): ${raw.substring(0, raw.length > 80 ? 80 : raw.length)}');
       _parseQtResponse(raw);
     } catch (e) {
-      debugPrint('poll error: $e');
+      debugPrint('pollPrices error: $e');
     }
   }
 
   void _parseQtResponse(String raw) {
     final re = RegExp(r'v_(\w+)="([^"]+)"');
     bool changed = false;
+    int matched = 0;
     for (final m in re.allMatches(raw)) {
       final code = m[1]!;
       final f = m[2]!.split('~');
-      if (f.length < 33) continue;
+      if (f.length < 33) {
+        debugPrint('parseQt skip $code: fields=${f.length}');
+        continue;
+      }
       final price = double.tryParse(f[3]) ?? 0;
       final prevClose = double.tryParse(f[4]) ?? 0;
       final change = double.tryParse(f[31]) ?? 0;
@@ -201,8 +209,10 @@ class StockProvider extends ChangeNotifier {
           lastUpdate: DateTime.now(),
         );
         changed = true;
+        matched++;
       }
     }
+    debugPrint('parseQt matched=$matched/${_stocks.length}');
     if (changed) notifyListeners();
   }
 
