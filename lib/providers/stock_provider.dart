@@ -10,8 +10,7 @@ import '../services/notification_service.dart';
 /// 播报错误信息，用于 UI 层展示
 class ReportError {
   final String message;
-  final bool needsEngineInstall;
-  ReportError(this.message, {this.needsEngineInstall = false});
+  ReportError(this.message);
 }
 
 /// 听股通 Phase 1 MVP — 核心播报引擎
@@ -193,13 +192,13 @@ class StockProvider extends ChangeNotifier {
     if (_recentAlerts.length > 30) _recentAlerts.removeLast();
     notifyListeners();
 
-    // TTS 语音播报（捕获异常，错误由 reportAllStocks 统一处理）
+    // TTS 语音播报（speak 内部已处理所有异常，抛出的都是需要用户感知的）
     try {
       await _tts.speak(text);
       _lastError = null;
     } on TtsException catch (e) {
       debugPrint('TTS speak failed: $e');
-      _lastError = ReportError(e.message, needsEngineInstall: e.engineMissing);
+      _lastError = ReportError(e.message);
       notifyListeners();
       return; // 跳过本次播报，继续下一只
     }

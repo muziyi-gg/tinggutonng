@@ -5,11 +5,10 @@ import 'package:flutter_tts/flutter_tts.dart';
 
 enum TtsState { idle, playing, stopped, error }
 
-/// TTS 异常：引擎不可用时抛出，方便上层捕获并提示用户
+/// TTS 异常：播报失败时抛出，供上层 UI 展示错误信息
 class TtsException implements Exception {
   final String message;
-  final bool engineMissing; // true=完全没有TTS引擎，需要安装
-  TtsException(this.message, {this.engineMissing = false});
+  TtsException(this.message);
   @override
   String toString() => message;
 }
@@ -24,17 +23,14 @@ class TtsService {
   TtsState get state => _state;
   bool get isEngineAvailable => _engineAvailable;
 
-  /// 初始化并验证 TTS 引擎是否可用
-  /// 抛出 TtsException 如果完全没有可用引擎（用户需安装）
+  /// 初始化 TTS 引擎
   Future<void> init() async {
     await _tts.awaitSpeakCompletion(true);
 
     if (defaultTargetPlatform == TargetPlatform.android) {
       final engines = await _tts.getEngines;
       debugPrint('Available TTS engines: $engines');
-      if (engines == null || (engines as List).isEmpty) {
-        debugPrint('WARNING: No TTS engine found on device!');
-      } else {
+      if (engines != null && (engines as List).isNotEmpty) {
         _engineAvailable = true;
       }
     }
@@ -76,7 +72,6 @@ class TtsService {
       _cancelSafetyTimer();
     });
 
-    // 安卓静默错误（引擎问题最常见）
     _tts.setCancelHandler(() {
       debugPrint('TTS cancelled');
       _state = TtsState.idle;
@@ -85,17 +80,15 @@ class TtsService {
   }
 
   /// 测试播报：调用一次短文本，返回是否成功出声
-  /// 用于初始化后自检
   Future<bool> testSound() async {
     if (_state == TtsState.playing) return false;
     try {
       final result = await _tts.speak('测');
-      // flutter_tts: 1 = success, 0 = error
+      await _tts.stop();
       return result == 1;
     } catch (_) {
       return false;
     } finally {
-      await _tts.stop();
       _state = TtsState.idle;
       _cancelSafetyTimer();
     }
@@ -114,41 +107,37 @@ class TtsService {
     _safetyTimer = null;
   }
 
-  /// 播报文本
-  /// 抛出 TtsException 如果 TTS 完全不可用
-  /// 返回 true/false 表示是否成功出声
-  Future<bool> speak(String text) async {
+  /// 播报文本。抛出 TtsException 表示失败（供 UI 层展示）。
+  /// 注意：本方法不负责发送本地通知，由调用方自行处理。
+  Future<void> speak(String text) async {
     if (_state == TtsState.playing) {
       debugPrint('TTS: already playing, skip');
-      return false;
+      return;
     }
 
     _state = TtsState.playing;
-
     try {
       final result = await _tts.speak(text);
       debugPrint('TTS speak result: $result (lang=$_currentLanguage)');
-
-      // flutter_tts 返回 1 表示成功（引擎已接受），0 表示失败
-      // 但注意：返回1不代表一定有声音（可能引擎不可用但API调用成功）
-      // 我们依赖 startHandler / errorHandler 来判断真实情况
+      if (result != 1) {
+        throw TtsException('语音引擎响应失败，请检查系统语音设置');
+      }
       _state = TtsState.idle;
       _cancelSafetyTimer();
-      return result == 1;
     } on PlatformException catch (e) {
       debugPrint('TTS PlatformException: ${e.code} ${e.message}');
       _state = TtsState.error;
       _cancelSafetyTimer();
-      // 常见错误码：not_found = 没有TTS引擎
       if (e.code == 'not_found' || e.code == 'engine_not_found') {
-        throw TtsException('未找到 TTS 引擎，请前往应用市场安装"讯飞语音引擎"或"Google 文字转语音"', engineMissing: true);
+        throw TtsException('未检测到语音引擎，请到系统设置中启用');
       }
-      throw TtsException('TTS 播报失败: ${e.message}');
+      throw TtsException('语音播报失败 (${e.code}): ${e.message}');
     } catch (e) {
       debugPrint('TTS speak exception: $e');
       _state = TtsState.error;
       _cancelSafetyTimer();
-      throw TtsException('TTS 播报异常: $e');
+      if (e is TtsException) rethrow;
+      throw TtsException('语音播报异常: $e');
     }
   }
 
