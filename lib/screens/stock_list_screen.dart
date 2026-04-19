@@ -208,7 +208,7 @@ class _AddStockSheetState extends State<_AddStockSheet> {
       final result = <_StockSuggestion>[];
 
       for (final item in items) {
-        if (!item.trim()) continue;
+        if (item.trim().isEmpty) continue;
         final parts = item.split(',');
         // parts[2] = 6位代码, parts[3] = 完整前缀代码 (sh600519 / sz000858 / bj920175)
         if (parts.length < 4) continue;
