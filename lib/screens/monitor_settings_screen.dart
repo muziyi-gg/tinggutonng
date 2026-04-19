@@ -121,7 +121,7 @@ class _IntervalSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext ctx) {
-    final options = [30, 60, 300];
+    final options = [1, 5, 10, 15, 30, 60, 300];
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -135,13 +135,17 @@ class _IntervalSelector extends StatelessWidget {
         const Text('定时播报自选股行情的时间间隔',
             style: TextStyle(fontSize: 12, color: Color(0xFFBBBBCC))),
         const SizedBox(height: 16),
-        Row(children: [
-          for (final sec in options)
-            Expanded(child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: _intervalButton(sec, current == sec),
-            )),
-        ]),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final sec in options)
+              SizedBox(
+                width: (MediaQuery.of(ctx).size.width - 80) / 4,
+                child: _intervalButton(sec, current == sec),
+              ),
+          ],
+        ),
       ]),
     );
   }

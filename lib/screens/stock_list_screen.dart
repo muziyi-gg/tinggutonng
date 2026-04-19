@@ -133,11 +133,13 @@ class _AddStockSheetState extends State<_AddStockSheet> {
 
     final common = _commonStocks();
     final q2 = q.toLowerCase();
+    // 宽松匹配：代码包含 / 名称包含 / 拼音前缀匹配 / 拼音含子串匹配
     final filtered = common.where((s) =>
       s.code.toLowerCase().contains(q2) ||
-      s.name.toLowerCase().contains(q2) ||
-      s.pinyin.startsWith(q2) ||
-      s.pinyin.contains(q2)
+      s.name.contains(q) ||                                    // 中文名称含子串
+      s.pinyin.startsWith(q2) ||                               // 拼音前缀
+      s.pinyin.replaceAll(' ', '').contains(q2) ||            // 去空格拼音含子串
+      s.pinyin.contains(q2)                                    // 拼音含子串
     ).toList();
 
     setState(() {
@@ -146,37 +148,60 @@ class _AddStockSheetState extends State<_AddStockSheet> {
     });
   }
 
-  List<_StockSuggestion> _commonStocks() => [
-    _StockSuggestion(code:'sh600519', name:'贵州茅台',   pinyin:'gzmj'),
-    _StockSuggestion(code:'sh601318', name:'中国平安',   pinyin:'zgpa'),
-    _StockSuggestion(code:'sh600036', name:'招商银行',   pinyin:'zsyh'),
-    _StockSuggestion(code:'sh600028', name:'中国石化',   pinyin:'zgfh'),
-    _StockSuggestion(code:'sh600050', name:'中国联通',   pinyin:'zglt'),
-    _StockSuggestion(code:'sh601166', name:'兴业银行',   pinyin:'xyyh'),
-    _StockSuggestion(code:'sh600000', name:'浦发银行',   pinyin:'pfyh'),
-    _StockSuggestion(code:'sh601398', name:'工商银行',   pinyin:'gsyh'),
-    _StockSuggestion(code:'sh601288', name:'农业银行',   pinyin:'nyyh'),
-    _StockSuggestion(code:'sh601988', name:'中国银行',   pinyin:'zgyh'),
-    _StockSuggestion(code:'sz000858', name:'五粮液',     pinyin:'wly'),
-    _StockSuggestion(code:'sz000001', name:'平安银行',   pinyin:'payh'),
-    _StockSuggestion(code:'sz000002', name:'万科A',       pinyin:'wka'),
-    _StockSuggestion(code:'sz000333', name:'美的集团',   pinyin:'mdjt'),
-    _StockSuggestion(code:'sz000651', name:'格力电器',   pinyin:'gldq'),
-    _StockSuggestion(code:'sz000858', name:'五粮液',     pinyin:'wly'),
-    _StockSuggestion(code:'sz300750', name:'宁德时代',   pinyin:'ndsd'),
-    _StockSuggestion(code:'sh688981', name:'中芯国际',   pinyin:'zxgj'),
-    _StockSuggestion(code:'sh600276', name:'恒瑞医药',   pinyin:'hryy'),
-    _StockSuggestion(code:'sh601012', name:'隆基绿能',   pinyin:'lgln'),
-    _StockSuggestion(code:'sh600900', name:'长江电力',   pinyin:'cjdl'),
-    _StockSuggestion(code:'sh601857', name:'中国石油',   pinyin:'zgsy'),
-    _StockSuggestion(code:'sh600031', name:'三一重工',   pinyin:'syzg'),
-    _StockSuggestion(code:'sz300059', name:'东方财富',   pinyin:'dftc'),
-    _StockSuggestion(code:'sh600887', name:'伊利股份',   pinyin:'ylgf'),
-    _StockSuggestion(code:'sz002475', name:'立讯精密',   pinyin:'lxjm'),
-    _StockSuggestion(code:'sh603259', name:'药明康德',   pinyin:'ymkd'),
-    _StockSuggestion(code:'sz000725', name:'京东方A',     pinyin:'jdfa'),
-    _StockSuggestion(code:'sh601888', name:'中国中免',   pinyin:'zgfm'),
+  /// 热词股票池（约50只，覆盖沪深主要板块）
+  static final List<_StockSuggestion> _hotList = [
+    _StockSuggestion(code:'sh600519', name:'贵州茅台',   pinyin:'gui zhou mao tai gzmt'),
+    _StockSuggestion(code:'sh601318', name:'中国平安',   pinyin:'zhong guo ping an zgpa'),
+    _StockSuggestion(code:'sh600036', name:'招商银行',   pinyin:'zhao shang yin hang zsyh'),
+    _StockSuggestion(code:'sh600028', name:'中国石化',   pinyin:'zhong guo shi hua zgfh'),
+    _StockSuggestion(code:'sh600050', name:'中国联通',   pinyin:'zhong guo lian tong zglt'),
+    _StockSuggestion(code:'sh601166', name:'兴业银行',   pinyin:'xing ye yin hang xyyh'),
+    _StockSuggestion(code:'sh600000', name:'浦发银行',   pinyin:'pu fa yin hang pfyh'),
+    _StockSuggestion(code:'sh601398', name:'工商银行',   pinyin:'gong shang yin hang gsyh'),
+    _StockSuggestion(code:'sh601288', name:'农业银行',   pinyin:'nong ye yin hang nyyh'),
+    _StockSuggestion(code:'sh601988', name:'中国银行',   pinyin:'zhong guo yin hang zgyh'),
+    _StockSuggestion(code:'sh601857', name:'中国石油',   pinyin:'zhong guo shi you zgsy'),
+    _StockSuggestion(code:'sz000858', name:'五粮液',     pinyin:'wu liang ye wly'),
+    _StockSuggestion(code:'sz000001', name:'平安银行',   pinyin:'ping an yin hang payh'),
+    _StockSuggestion(code:'sz000002', name:'万科A',       pinyin:'wan ke wk'),
+    _StockSuggestion(code:'sz000333', name:'美的集团',   pinyin:'mei di ji tuan mdjt'),
+    _StockSuggestion(code:'sz000651', name:'格力电器',   pinyin:'ge li dian qi gldq'),
+    _StockSuggestion(code:'sz300750', name:'宁德时代',   pinyin:'ning de shi dai ndsd'),
+    _StockSuggestion(code:'sh688981', name:'中芯国际',   pinyin:'zhong xin guo ji zxgj'),
+    _StockSuggestion(code:'sh600276', name:'恒瑞医药',   pinyin:'heng rui yi yao hryy'),
+    _StockSuggestion(code:'sh601012', name:'隆基绿能',   pinyin:'long ji lv neng ljln'),
+    _StockSuggestion(code:'sh600900', name:'长江电力',   pinyin:'chang jiang dian li cjdl'),
+    _StockSuggestion(code:'sh600031', name:'三一重工',   pinyin:'san yi zhong gong syzg'),
+    _StockSuggestion(code:'sz300059', name:'东方财富',   pinyin:'dong fang cai fu dftc dfcf'),
+    _StockSuggestion(code:'sh600887', name:'伊利股份',   pinyin:'yi li gu fen ylgf'),
+    _StockSuggestion(code:'sz002475', name:'立讯精密',   pinyin:'li xun jing mi lxjm'),
+    _StockSuggestion(code:'sh603259', name:'药明康德',   pinyin:'yao ming kang de ymkd'),
+    _StockSuggestion(code:'sz000725', name:'京东方A',     pinyin:'jing dong fang jdf'),
+    _StockSuggestion(code:'sh601888', name:'中国中免',   pinyin:'zhong guo zhong mian zgfm'),
+    _StockSuggestion(code:'sh600009', name:'上海机场',   pinyin:'shang hai ji chang shjjc'),
+    _StockSuggestion(code:'sh600104', name:'上汽集团',   pinyin:'shang qi ji tuan sqjt'),
+    _StockSuggestion(code:'sh600585', name:'海螺水泥',   pinyin:'hai luo shui ni hlsn'),
+    _StockSuggestion(code:'sh600150', name:'中国船舶',   pinyin:'zhong guo chuan bo zgcb'),
+    _StockSuggestion(code:'sh600346', name:'恒力石化',   pinyin:'heng li shi hua hlfh'),
+    _StockSuggestion(code:'sh600309', name:'万华化学',   pinyin:'wan hua hua xue whhx'),
+    _StockSuggestion(code:'sh601669', name:'中国电建',   pinyin:'zhong guo dian jian zgdj'),
+    _StockSuggestion(code:'sh601186', name:'中国铁建',   pinyin:'zhong guo tie jian zgtj'),
+    _StockSuggestion(code:'sh601728', name:'中国电信',   pinyin:'zhong guo dian xin zgdx'),
+    _StockSuggestion(code:'sh601728', name:'中国移动',   pinyin:'zhong guo yi dongzgyd'),
+    _StockSuggestion(code:'sh600036', name:'招商银行',   pinyin:'zhao shang yin hang zsyh'),
+    _StockSuggestion(code:'sz300015', name:'爱尔眼科',   pinyin:'ai er yan ke aeyk'),
+    _StockSuggestion(code:'sz300760', name:'迈瑞医疗',   pinyin:'mai rui yi liao mryl'),
+    _StockSuggestion(code:'sh688041', name:'海光信息',   pinyin:'hai guang xin xi hxxx'),
+    _StockSuggestion(code:'sz000063', name:'中兴通讯',   pinyin:'zhong xing tong xun zxtx'),
+    _StockSuggestion(code:'sh600089', name:'特变电工',   pinyin:'te bian dian gong tbdy'),
+    _StockSuggestion(code:'sz300122', name:'智飞生物',   pinyin:'zhi fei sheng wu zfsw'),
+    _StockSuggestion(code:'sh600703', name:'三安光电',   pinyin:'san an guang dian sagd'),
+    _StockSuggestion(code:'sh603288', name:'海天味业',   pinyin:'hai tian wei ye htwy'),
+    _StockSuggestion(code:'sh600690', name:'海尔智家',   pinyin:'hai er zhi jia hezj'),
+    _StockSuggestion(code:'sh600690', name:'海信视像',   pinyin:'hai xin shi xiang hxsx'),
   ];
+
+  List<_StockSuggestion> _commonStocks() => _hotList;
 
   @override
   Widget build(BuildContext ctx) {

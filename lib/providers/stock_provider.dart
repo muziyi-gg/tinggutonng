@@ -27,10 +27,10 @@ class StockProvider extends ChangeNotifier {
   bool _isPolling = false;
   int _reportIntervalSec = 60; // 默认60秒播报一次
 
-  // 暂停播报标志（防止播报重叠）
+  // 播报开关（用户按按钮开启/关闭，true=循环播报已启用）
   bool _speaking = false;
-  // 停止请求标志（用户主动停止）
-  bool _stopRequested = false;
+  // 标记当前是否正在执行播报（单次循环内，防止重叠）
+  bool _isReporting = false;
 
   // 当前错误（UI 层负责展示和清除）
   ReportError? _lastError;
@@ -105,13 +105,6 @@ class StockProvider extends ChangeNotifier {
     // 每秒轮询价格（使用 _pollPricesLive 读取实时股票列表）
     _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) => _pollPricesLive());
 
-    // 定时播报
-    _reportTimer?.cancel();
-    _reportTimer = Timer.periodic(
-      Duration(seconds: _reportIntervalSec),
-      (_) => _reportAll(),
-    );
-
     // 立即获取一次价格
     _pollPricesLive();
 
@@ -120,7 +113,6 @@ class StockProvider extends ChangeNotifier {
 
   void stopWatch() {
     _pollTimer?.cancel();
-    _reportTimer?.cancel();
     _isPolling = false;
     _stocks.clear();
     notifyListeners();
@@ -146,11 +138,23 @@ class StockProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 开启循环播报（用户按播放按钮）
+  void startReport() {
+    if (_speaking) return; // 已在播报中
+    _speaking = true;
+    _reportTimer?.cancel();
+    _reportTimer = Timer.periodic(
+      Duration(seconds: _reportIntervalSec),
+      (_) => _reportAll(),
+    );
+    notifyListeners();
+  }
+
   void setReportInterval(int seconds) {
     _reportIntervalSec = seconds;
-    // 重新启动定时器
-    _reportTimer?.cancel();
-    if (_isPolling) {
+    // 如果正在播报，重新启动定时器（用新间隔）
+    if (_speaking) {
+      _reportTimer?.cancel();
       _reportTimer = Timer.periodic(
         Duration(seconds: seconds),
         (_) => _reportAll(),
@@ -169,29 +173,33 @@ class StockProvider extends ChangeNotifier {
       final resp = await http.get(
         uri,
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-          'Referer': 'https://finance.sina.com.cn/',
-        },
-      ).timeout(const Duration(seconds: 3));
-
-      if (resp.statusCode != 200) {
-        debugPrint('Sina HTTP ${resp.statusCode}');
-        return;
+  /// 拉取实时价格：新浪 vnall (GBK)，直接返回现价/涨跌额/涨跌幅
+  /// 每秒一次，股票数量少时足够。
+  Future<void> _pollPricesLive() async {
+    if (_stocks.isEmpty) return;
+    final codes = _stocks.keys.toList();
+    final url = 'http://hq.sinajs.cn/list=${codes.join(",")}';
+    try {
+      final r = await _http.get(
+        Uri.parse(url),
+        headers: {'Referer': 'http://finance.sina.com.cn', 'Accept': '*/*'},
+      ).timeout(const Duration(seconds: 8));
+      if (r.statusCode == 200) {
+        final text = _decodeGbk(r.bodyBytes);
+        _parseSinaResponse(text);
       }
-      // 新浪接口返回 GBK/GB18030 编码
-      // 注意：dart http 默认按 Content-Type charset 解码，
-      // 但对 GBK 支持不完整，直接用 bodyBytes + latin1.decode 更可靠
-      final raw = _decodeGbk(resp.bodyBytes);
-      debugPrint('Sina raw(${raw.length}): ${raw.substring(0, raw.length > 120 ? 120 : raw.length)}');
-      _parseSinaResponse(raw);
     } catch (e) {
-      debugPrint('Sina poll error: $e');
+      debugPrint('Poll error: $e');
     }
   }
 
-  /// 解析新浪 hq_str_{code}="name,price,prevClose,open,vol,... 日期,时间" 格式
+  /// 解析新浪 hq_str_{code}="name,f2,f3,f4,f5,f6... 日期,时间" 格式
+  /// vnall 字段（f 为逗号分隔数组下标，从0计）：
+  /// f[0]=代码 f[1]=名称 f[2]=现价 f[3]=昨收 f[4]=今开 f[5]=成交量
+  /// f[6]=外盘 f[7]=内盘 f[8]=买一价 f[9]=买一量 ... f[17]=时间戳
+  /// f[19]=涨跌额 f[20]=涨跌% f[21]=最高 f[22]=最低
+  /// f[30]=市值 f[31]=市盈率 f[32]=换手率 f[33]=振幅
   void _parseSinaResponse(String raw) {
-    // 匹配 var hq_str_sz300059="东方财富,19.95,20.03,19.90,... 日期,时间,...";
     final re = RegExp(r'hq_str_(\w+)="([^"]+)"');
     bool changed = false;
     int matched = 0;
@@ -202,24 +210,22 @@ class StockProvider extends ChangeNotifier {
         debugPrint('Sina skip $code: fields=${f.length}');
         continue;
       }
-      // 新浪字段: f[1]=参考价(非实时), f[2]=昨收, f[3]=今开, f[6]=bid实时买入价
-      // 对于涨跌：当前价用bid(f[6])，昨收用f[2]，计算涨跌额和涨跌幅
-      final prevClose = double.tryParse(f[2]) ?? 0;
-      final price = double.tryParse(f[6]) ?? 0;
-      final openPrice = double.tryParse(f[3]) ?? 0;
-      // 如果bid价格为0（可能停牌或数据未刷新），降级使用f[1]参考价
-      final effectivePrice = price > 0 ? price : (double.tryParse(f[1]) ?? 0);
-      final change = prevClose > 0 ? effectivePrice - prevClose : 0.0;
-      final changePct = prevClose > 0 ? (change / prevClose) * 100 : 0.0;
+      // 取接口直接返回的现价/涨跌额/涨跌幅，不自行计算
+      final price    = double.tryParse(f[2])  ?? 0; // 现价
+      final prevClose = double.tryParse(f[3])  ?? 0; // 昨收
+      final openPrice = double.tryParse(f[4])  ?? 0; // 今开
+      final change    = double.tryParse(f[19]) ?? 0; // 涨跌额（接口直接返回）
+      final changePct = double.tryParse(f[20]) ?? 0; // 涨跌幅%（接口直接返回）
 
-      // 解析服务器时间：f[30]=日期(YYYY-MM-DD), f[31]=时间(HH:MM:SS)
+      // 解析时间戳 f[17]：Unix 秒
       DateTime? serverTime;
       DateTime? tradeDate;
-      if (f[30].isNotEmpty && f[31].isNotEmpty) {
+      if (f[17].isNotEmpty) {
         try {
-          final dateStr = '${f[30]} ${f[31]}';
-          serverTime = DateTime.parse(dateStr.replaceFirst(' ', 'T'));
-          tradeDate = DateTime.parse(f[30]); // 纯日期部分
+          final ts = int.tryParse(f[17]) ?? 0;
+          serverTime = DateTime.fromMillisecondsSinceEpoch(ts * 1000, isUtc: true)
+              .toLocal();
+          tradeDate = DateTime(serverTime.year, serverTime.month, serverTime.day);
         } catch (_) {
           serverTime = DateTime.now();
           tradeDate = DateTime.now();
@@ -230,7 +236,7 @@ class StockProvider extends ChangeNotifier {
         _stocks[code] = Stock(
           code: code,
           name: _stocks[code]!.name,
-          price: effectivePrice,
+          price: price,
           prevClose: prevClose,
           change: change,
           changePct: changePct,
@@ -257,18 +263,18 @@ class StockProvider extends ChangeNotifier {
     }
   }
 
-  /// 定时播报：按间隔播报所有股票
+  /// 定时播报：按间隔循环播报所有股票，直到用户关闭
+  /// 由 _reportTimer 定时器调用
   Future<void> _reportAll() async {
-    if (_stocks.isEmpty) return;
-    _speaking = true;
-    _stopRequested = false;
+    if (_stocks.isEmpty || _isReporting) return;
+    _isReporting = true;
     try {
       bool anySkipped = false;
       for (final s in _stocks.values) {
-        // 检查用户是否请求停止
-        if (_stopRequested) {
-          debugPrint('TTS stop requested, aborting');
-          break;
+        // 用户关闭播报时立即退出
+        if (!_speaking) {
+          debugPrint('TTS stopped by user');
+          return;
         }
         if (s.price <= 0) {
           debugPrint('TTS skip ${s.name}: price=${s.price} (数据未就绪)');
@@ -278,12 +284,11 @@ class StockProvider extends ChangeNotifier {
         final dir = s.changePct >= 0 ? '涨' : '跌';
         final text = '${s.name}，报${s.price.toStringAsFixed(2)}元，$dir${s.changePct.abs().toStringAsFixed(2)}%';
         await _speakAndNotify(text, AlertType.selfQuote);
+        if (!_speaking) return;
         // 播报间隔（等待上一句播完 + 短暂停顿）
         await Future.delayed(const Duration(milliseconds: 800));
-        // 停止请求检查（延迟后再次检查）
-        if (_stopRequested) break;
+        if (!_speaking) return;
       }
-      // 所有股票价格都是0，说明行情未拉到
       if (anySkipped && _stocks.values.every((s) => s.price <= 0)) {
         _lastError = ReportError('行情数据未就绪，请检查网络后重试');
         notifyListeners();
@@ -291,17 +296,16 @@ class StockProvider extends ChangeNotifier {
     } catch (e) {
       debugPrint('TTS _reportAll error: $e');
     } finally {
-      _speaking = false;
-      _stopRequested = false;
-      notifyListeners(); // 确保 UI 始终收到状态更新
+      _isReporting = false;
     }
   }
 
-  /// 停止当前播报（用户点击停止按钮）
+  /// 停止播报（用户点击停止按钮）
   Future<void> stopSpeaking() async {
-    _stopRequested = true;
-    await _tts.stop();
     _speaking = false;
+    _reportTimer?.cancel();
+    _reportTimer = null;
+    await _tts.stop();
     notifyListeners();
   }
 

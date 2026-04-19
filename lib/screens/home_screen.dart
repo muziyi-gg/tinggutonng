@@ -38,23 +38,24 @@ class HomeScreen extends StatelessWidget {
           icon: const Icon(Icons.bug_report_outlined, color: Color(0xFF666687), size:22),
           tooltip: 'TTS调试',
         ),
-        // 播报中显示停止按钮，否则显示播放按钮
-        if (sp.isSpeaking)
-          IconButton(
-            onPressed: () => _handleStop(ctx),
-            icon: const Icon(Icons.stop_circle, color: Color(0xFFFF9500), size:28),
-            tooltip: '停止播报',
-          )
-        else
-          IconButton(
-            onPressed: sp.stockList.isEmpty ? null : () => _handleReport(ctx),
-            icon: Icon(
-              Icons.play_circle_fill,
-              color: sp.stockList.isEmpty ? const Color(0xFFDDDDDD) : const Color(0xFFE84057),
-              size:28,
-            ),
-            tooltip: '手动播报自选股',
+        // 播报按钮：toggle 开关，点击开始播报，再次点击停止
+        IconButton(
+          onPressed: sp.stockList.isEmpty ? null : () {
+            if (sp.isSpeaking) {
+              sp.stopSpeaking();
+            } else {
+              sp.startReport();
+            }
+          },
+          icon: Icon(
+            sp.isSpeaking ? Icons.stop_circle : Icons.play_circle_fill,
+            color: sp.stockList.isEmpty
+                ? const Color(0xFFDDDDDD)
+                : (sp.isSpeaking ? const Color(0xFFFF9500) : const Color(0xFFE84057)),
+            size:28,
           ),
+          tooltip: sp.isSpeaking ? '停止播报' : '开始播报',
+        ),
       ]),
     );
       },
@@ -140,35 +141,7 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  Future<void> _handleReport(BuildContext ctx) async {
-    final sp = Provider.of<StockProvider>(ctx, listen: false);
-    final err = await sp.reportAllStocks();
-    if (err != null && ctx.mounted) {
-      _showErrorDialog(ctx, err);
-    }
-  }
 
-  Future<void> _handleStop(BuildContext ctx) async {
-    final sp = Provider.of<StockProvider>(ctx, listen: false);
-    await sp.stopSpeaking();
-  }
-
-  void _showErrorDialog(BuildContext ctx, ReportError err) {
-    showDialog(
-      context: ctx,
-      builder: (ctx) => AlertDialog(
-        title: const Row(children: [
-          Icon(Icons.volume_off, color: Color(0xFFE84057)),
-          SizedBox(width:8),
-          Text('播报失败', style: TextStyle(fontSize:17)),
-        ]),
-        content: Text(err.message, style: const TextStyle(fontSize:14)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('知道了')),
-        ],
-      ),
-    );
-  }
 
   Widget _sectionTitle(String title, {VoidCallback? onSeeAll}) {
     return Padding(
