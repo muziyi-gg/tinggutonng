@@ -116,13 +116,14 @@ class _AddStockSheetState extends State<_AddStockSheet> {
   final _ctrl = TextEditingController();
   final _suggestions = <_StockSuggestion>[];
   bool _loading = false;
-  String _lastQuery = '';
   Timer? _debounce;
 
   @override
   void initState() {
     super.initState();
     _ctrl.addListener(_onSearchChanged);
+    // 默认展示热词
+    WidgetsBinding.instance.addPostFrameCallback((_) => _showHotList());
   }
 
   @override
@@ -139,17 +140,15 @@ class _AddStockSheetState extends State<_AddStockSheet> {
     });
   }
 
-  /// 搜索策略：
-  /// - 中文/数字输入 → 调用东方财富 API 搜索全市场 A 股
-  /// - 纯拼音输入（无中文） → 本地热词池匹配（拼音首字母/全拼/去空格拼音）
-  /// - API 无结果时 → 回退到本地热词池
+  /// 搜索策略：所有输入（中文/拼音/代码）统一走新浪搜索 API
+  /// 新浪 suggest3.sinajs.cn 支持全市场 A 股搜索，完美支持中文
+  /// 同时在本地热词池做拼音模糊匹配兜底
   Future<void> _search(String q) async {
     if (!mounted) return;
     setState(() { _loading = true; _suggestions.clear(); });
 
     final q2 = q.trim();
     if (q2.isEmpty) {
-      // 显示热词（默认展示）
       _showHotList();
       return;
     }
@@ -159,89 +158,92 @@ class _AddStockSheetState extends State<_AddStockSheet> {
       return;
     }
 
-    final isPinyin = !RegExp(r'[\u4e00-\u9fa5]').hasMatch(q2) && RegExp(r'[a-zA-Z]').hasMatch(q2);
-
-    if (isPinyin) {
-      // 纯拼音 → 本地热词池
-      await _searchLocal(q2);
-    } else {
-      // 中文或数字 → 东方财富 API
-      final apiResults = await _searchEastMoney(q2);
-      if (apiResults.isNotEmpty) {
-        if (!mounted) return;
-        setState(() {
-          _suggestions.addAll(apiResults.take(10));
-          _loading = false;
-        });
-      } else {
-        // API 无结果，尝试本地热词
-        await _searchLocal(q2);
-      }
+    // 优先调新浪 API（全市场，支持中文/拼音/代码）
+    final apiResults = await _searchSina(q2);
+    if (apiResults.isNotEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _suggestions.addAll(apiResults.take(12));
+        _loading = false;
+      });
+      return;
     }
 
-    _lastQuery = q2;
+    // 新浪无结果时，搜本地热词池兜底（处理冷门股/拼音）
+    await _searchLocal(q2);
   }
 
-  /// 东方财富全市场搜索 API
-  /// 搜索中文名称或股票代码，支持 A 股所有沪深京个股
-  Future<List<_StockSuggestion>> _searchEastMoney(String q) async {
+  /// 新浪全市场股票搜索 API
+  /// 支持：中文名称、拼音（首字母/全拼）、股票代码（6位或带前缀）
+  /// type=11,12,13,14,15 覆盖 A 股（沪深京）
+  /// 响应格式：var suggestvalue="名称,类型,代码,完整代码,名称2...;..."
+  Future<List<_StockSuggestion>> _searchSina(String q) async {
     try {
       final encoded = Uri.encodeComponent(q);
-      final url = 'https://searchapi.eastmoney.com/api/suggest/get?input=$encoded&type=14&token=D43BF722C8E33BDC906FB84D85E326E8&count=10';
+      final url = 'https://suggest3.sinajs.cn/suggest/type=11,12,13,14,15&key=$encoded';
       final r = await http.get(
         Uri.parse(url),
-        headers: {'Accept': 'application/json'},
+        headers: {
+          'User-Agent': 'Mozilla/5.0',
+          'Referer': 'https://finance.sina.com.cn/',
+        },
       ).timeout(const Duration(seconds: 5));
-      if (r.statusCode == 200) {
-        final data = jsonDecode(r.body) as Map<String, dynamic>;
-        final stocks = data['QuotationCodeTable']?['Data'] as List? ?? [];
-        return stocks.map((s) {
-          final code = s['Code'] as String;
-          final name = s['Name'] as String;
-          final mkt = s['MarketType'] as int? ?? 0;
-          // MarketType: 1=沪市, 2=深市, 其他=北交所等
-          String prefix = '';
-          if (mkt == 1) prefix = 'sh';
-          else if (mkt == 2) prefix = 'sz';
-          // 科创板 688xxx → sh
-          if (prefix.isEmpty && code.startsWith('688')) prefix = 'sh';
-          // 创业板 300xxx → sz
-          if (prefix.isEmpty && code.startsWith('300')) prefix = 'sz';
-          // 北交所 8xxxxx → bj
-          if (prefix.isEmpty && code.startsWith('8')) prefix = 'bj';
-          // 默认
-          if (prefix.isEmpty) prefix = 'sz';
-          return _StockSuggestion(
-            code: '$prefix$code',
-            name: name,
-            pinyin: (s['PinYin'] as String? ?? '').toLowerCase(),
-          );
-        }).toList();
+
+      if (r.statusCode != 200) return [];
+
+      // 响应是 GBK 编码
+      String body;
+      try {
+        body = latin1.decode(r.bodyBytes);
+      } catch (_) {
+        final safe = r.bodyBytes.map((b) => b < 256 ? b : 63).toList();
+        body = latin1.decode(safe);
       }
+
+      // 解析 var suggestvalue="..."
+      final match = RegExp(r'var suggestvalue="([^"]+)"').firstMatch(body);
+      if (match == null) return [];
+
+      final items = match[1]!.split(';');
+      final result = <_StockSuggestion>[];
+
+      for (final item in items) {
+        if (!item.trim()) continue;
+        final parts = item.split(',');
+        // parts[2] = 6位代码, parts[3] = 完整前缀代码 (sh600519 / sz000858 / bj920175)
+        if (parts.length < 4) continue;
+        final code = parts[3].trim();        // 完整代码，如 sh600519
+        final name = parts[0].trim();
+        if (code.isEmpty || name.isEmpty) continue;
+
+        // 只取 A 股（完整代码以 sh/sz/bj 开头，且代码为6位数字）
+        if (!RegExp(r'^(sh|sz|bj)\d{6}$').hasMatch(code)) continue;
+
+        result.add(_StockSuggestion(
+          code: code,
+          name: name,
+          pinyin: '',
+        ));
+      }
+      return result;
     } catch (e) {
-      debugPrint('EastMoney search error: $e');
+      debugPrint('Sina search error: $e');
     }
     return [];
   }
 
-  /// 本地热词池搜索（拼音/名称/代码）
+  /// 本地热词池搜索（拼音模糊兜底）
   Future<void> _searchLocal(String q) async {
     if (!mounted) return;
     final q2 = q.toLowerCase().trim();
     final filtered = _hotList.where((s) {
-      // 代码含子串
       if (s.code.toLowerCase().contains(q2)) return true;
-      // 名称含子串（中文）
       if (s.name.contains(q2)) return true;
-      // 拼音全匹配（含去空格）
       final py = s.pinyin.replaceAll(' ', '');
       if (py == q2) return true;
-      // 拼音含子串
       if (py.contains(q2)) return true;
-      // 拼音首字母（取每个词首字母组成的字符串）
       final firstLetters = s.pinyin.split(' ').where((w) => w.isNotEmpty).map((w) => w[0]).join();
       if (firstLetters == q2) return true;
-      // 拼音首字母含子串
       if (firstLetters.contains(q2)) return true;
       return false;
     }).toList();
@@ -256,14 +258,13 @@ class _AddStockSheetState extends State<_AddStockSheet> {
   void _showHotList() {
     if (!mounted) return;
     setState(() {
-      // 展示全部热词（按默认顺序）
       _suggestions.clear();
       _suggestions.addAll(_hotList.take(30));
       _loading = false;
     });
   }
 
-  /// 热词股票池（覆盖沪深主要板块，80只A股核心股票）
+  /// 本地热词池（覆盖沪深京主要板块，80只A股核心股票）
   static final List<_StockSuggestion> _hotList = [
     _StockSuggestion(code:'sh600519', name:'贵州茅台',   pinyin:'gui zhou mao tai gzmt'),
     _StockSuggestion(code:'sh601318', name:'中国平安',   pinyin:'zhong guo ping an zgpa'),
@@ -341,7 +342,6 @@ class _AddStockSheetState extends State<_AddStockSheet> {
     _StockSuggestion(code:'sz002714', name:'牧原股份',   pinyin:'mu yuan gu fen mygf'),
     _StockSuggestion(code:'sz002601', name:'龙佰集团',   pinyin:'long bai ji tuan lbjt'),
     _StockSuggestion(code:'sh601127', name:'赛力斯',    pinyin:'sai li si sls'),
-    _StockSuggestion(code:'sh601127', name:'小康股份',   pinyin:'xiao kang gu fen xkgf'),
   ];
 
   @override
