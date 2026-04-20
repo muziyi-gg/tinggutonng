@@ -1,5 +1,5 @@
-import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:charset_converter/charset_converter.dart';
 import '../models/stock.dart';
 
 /// 腾讯行情 API 服务（UTF-8 编码，数据实时准确）
@@ -30,7 +30,8 @@ class StockApiService {
     ).timeout(const Duration(seconds: 4));
 
     if (resp.statusCode != 200) return {};
-    return _parseTencentResponse(_decodeGbk(resp.bodyBytes));
+    final body = await CharsetConverter.decode('gbk', resp.bodyBytes);
+    return _parseTencentResponse(body);
   }
 
   Map<String, StockRaw> _parseTencentResponse(String raw) {
@@ -72,15 +73,6 @@ class StockApiService {
     return result;
   }
 
-  /// GBK/GB18030 解码
-  String _decodeGbk(List<int> bytes) {
-    try {
-      return latin1.decode(bytes);
-    } catch (_) {
-      final safe = bytes.map((b) => b < 256 ? b : 63).toList();
-      return latin1.decode(safe);
-    }
-  }
 }
 
 /// 原始行情数据
