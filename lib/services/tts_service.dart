@@ -21,7 +21,7 @@ class TtsService {
   String _currentLanguage = 'zh-CN';
 
   /// MediaTtsHandler：把 TTS 封装成 foreground service（锁屏/切App时继续播）
-  final MediaTtsHandler _mediaHandler = MediaTtsHandler(_tts);
+  late final MediaTtsHandler _mediaHandler;
   Completer<void>? _speakCompleter;
 
   /// 诊断信息（供调试页面展示）
@@ -168,6 +168,7 @@ class TtsService {
       });
 
       // 初始化 foreground service handler（锁屏/切App时继续播）
+      _mediaHandler = MediaTtsHandler(_tts);
       await _mediaHandler.init();
       debugPrint('TTS init complete successfully');
       _initDone = true;
