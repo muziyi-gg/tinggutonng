@@ -409,16 +409,19 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
     _appLifecycle = state;
 
     if (state == AppLifecycleState.inactive) {
-      // 记录切后台时是否在播（用于恢复判断）
-      _wasPlayingWhenBackgrounded = _speaking && _tts.isPlaying;
-      _log('lifecycle', 'App INACTIVE: wasPlaying=$_wasPlayingWhenBackgrounded, speaking=${_tts.isPlaying}');
+      // 记录切后台时是否在播
+      // 用 _tts.isPlaying（TTS 引擎状态）作为主要判断，
+      // 同时检查 _speaking（TTS START 事件是否已到达）
+      _wasPlayingWhenBackgrounded = _tts.isPlaying || _speaking;
+      _log('lifecycle', 'App INACTIVE: wasPlaying=$_wasPlayingWhenBackgrounded, tts.isPlaying=${_tts.isPlaying}, _speaking=$_speaking');
     } else if (state == AppLifecycleState.paused) {
       _log('lifecycle', 'App PAUSED: wasPlaying=$_wasPlayingWhenBackgrounded, timerAlive=${_reportTimer != null}');
     } else if (state == AppLifecycleState.resumed) {
-      _log('lifecycle', 'App RESUMED: wasPlaying=$_wasPlayingWhenBackgrounded, speaking=${_tts.isPlaying}, _speaking=$_speaking');
+      _log('lifecycle', 'App RESUMED: wasPlaying=$_wasPlayingWhenBackgrounded, tts.isPlaying=${_tts.isPlaying}, _speaking=$_speaking');
 
       // 自动恢复机制：如果之前在播但 TTS 被系统中断停止，立即重启播报周期
-      if (_wasPlayingWhenBackgrounded && _speaking && !_tts.isPlaying) {
+      // 用 _tts.isPlaying 判断（TTS 引擎状态），用 _speaking 作为兜底
+      if (_wasPlayingWhenBackgrounded && (!_tts.isPlaying || _speaking)) {
         _log('lifecycle', 'App resumed: TTS was interrupted, restarting report cycle immediately');
         _reportTimer?.cancel();
         _reportTimer = Timer.periodic(
@@ -428,7 +431,7 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
         // 立即触发一次播报（Timer 没有 fire()，手动调用）
         _reportAll();
         _log('lifecycle', 'App resumed: triggered immediate report');
-      } else if (_wasPlayingWhenBackgrounded && _speaking) {
+      } else if (_wasPlayingWhenBackgrounded && _tts.isPlaying) {
         // TTS 还在播（极端情况），继续等待
         _log('lifecycle', 'App resumed: TTS still playing, will continue');
       } else if (_reportTimer == null && _speaking) {
