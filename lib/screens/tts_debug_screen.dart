@@ -81,8 +81,8 @@ class _TtsDebugScreenState extends State<TtsDebugScreen> {
                       },
                       icon: const Icon(Icons.stop, size: 18),
                       label: const Text('停止'),
-                      style: const OutlinedButton.styleFrom(
-                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
                       ),
                     ),
                   ]),
