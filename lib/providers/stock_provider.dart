@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:charset_converter/charset_converter.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -15,9 +16,19 @@ class ReportError {
   ReportError(this.message);
 }
 
+/// 调试事件日志项
+class DebugLogEntry {
+  final String tag; // SP = StockProvider, TTS = TtsService
+  final String msg;
+  final DateTime ts;
+  DebugLogEntry(this.tag, this.msg) : ts = DateTime.now();
+  @override
+  String toString() => '[${ts.toString().substring(11, 19)}][$tag] $msg';
+}
+
 /// 听股通 Phase 1 MVP — 核心播报引擎
 /// 数据流：API轮询 → 播报间隔判断 → TTS语音 + 本地通知
-class StockProvider extends ChangeNotifier {
+class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
   final TtsService _tts = TtsService();
   final NotificationService _notif = NotificationService();
 
@@ -38,6 +49,16 @@ class StockProvider extends ChangeNotifier {
   /// 当前错误（UI 层负责展示和清除）
   ReportError? _lastError;
 
+  /// App 生命周期（用于检测切后台）
+  AppLifecycleState _appLifecycle = AppLifecycleState.resumed;
+
+  /// App 切后台时 TTS 是否在播（用于切回前台判断是否恢复）
+  bool _wasPlayingWhenBackgrounded = false;
+
+  /// 调试日志（保留最近200条）
+  final List<DebugLogEntry> _debugLog = [];
+  static const int _maxLog = 200;
+
   Map<String, Stock> get stocks => _stocks;
   List<Stock> get stockList => _stocks.values.toList();
   List<AlertItem> get recentAlerts => _recentAlerts;
@@ -45,6 +66,15 @@ class StockProvider extends ChangeNotifier {
   int get reportIntervalSec => _reportIntervalSec;
   ReportError? get lastError => _lastError;
   bool get isSpeaking => _speaking;
+  List<DebugLogEntry> get debugLog => List.unmodifiable(_debugLog);
+
+  void _log(String tag, String msg) {
+    _debugLog.add(DebugLogEntry(tag, msg));
+    if (_debugLog.length > _maxLog) _debugLog.removeAt(0);
+    debugPrint('[SP] [$tag] $msg');
+  }
+
+  void clearLog() => _debugLog.clear();
 
   void clearError() {
     _lastError = null;
@@ -52,6 +82,7 @@ class StockProvider extends ChangeNotifier {
   }
 
   Future<void> init() async {
+    WidgetsBinding.instance.addObserver(this);
     await _tts.init();
     await _notif.init();
     // 从本地存储恢复自选股（必须等待完成，防止竞态）
@@ -79,7 +110,7 @@ class StockProvider extends ChangeNotifier {
         await _pollPricesLive();
       }
     } catch (e) {
-      debugPrint('_loadStocks error: $e');
+      _log('init', '_loadStocks error: $e');
     }
   }
 
@@ -89,7 +120,7 @@ class StockProvider extends ChangeNotifier {
       final list = _stocks.values.map((s) => {'code': s.code, 'name': s.name}).toList();
       await prefs.setString(_kKey, jsonEncode(list));
     } catch (e) {
-      debugPrint('_saveStocks error: $e');
+      _log('lifecycle', '_saveStocks error: $e');
     }
   }
 
@@ -99,6 +130,7 @@ class StockProvider extends ChangeNotifier {
       // 已经运行中，重启轮询以包含最新股票列表
       _pollTimer?.cancel();
       _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) => _pollPricesLive());
+      _log('lifecycle', '_ensureWatchRunning: restarted polling (already running)');
       return;
     }
 
@@ -112,6 +144,7 @@ class StockProvider extends ChangeNotifier {
     // 立即获取一次价格
     _pollPricesLive();
 
+    _log('lifecycle', '_ensureWatchRunning: started polling, stocks=${codes.length}');
     notifyListeners();
   }
 
@@ -119,6 +152,7 @@ class StockProvider extends ChangeNotifier {
     _pollTimer?.cancel();
     _isPolling = false;
     _stocks.clear();
+    _log('lifecycle', 'stopWatch: stopped polling and cleared stocks');
     notifyListeners();
   }
 
@@ -145,9 +179,13 @@ class StockProvider extends ChangeNotifier {
   /// 开启循环播报（用户按播放按钮）
   /// 定时器按 _reportIntervalSec 间隔触发，播完一轮后等下一轮
   void startReport() {
-    if (_speaking) return; // 已在播报中
+    if (_speaking) {
+      _log('report', 'startReport: already speaking, ignore');
+      return;
+    }
     _speaking = true;
     _reportTimer?.cancel();
+    _log('report', 'startReport: _speaking=true, starting timer every ${_reportIntervalSec}s');
     // 立即播一次，然后按间隔循环
     _reportAll(); // 异步，不阻塞
     _reportTimer = Timer.periodic(
@@ -159,6 +197,7 @@ class StockProvider extends ChangeNotifier {
 
   void setReportInterval(int seconds) {
     _reportIntervalSec = seconds;
+    _log('report', 'setReportInterval: changed to $seconds');
     // 如果正在播报，重新启动定时器（用新间隔）
     if (_speaking) {
       _reportTimer?.cancel();
@@ -169,7 +208,6 @@ class StockProvider extends ChangeNotifier {
     }
     notifyListeners();
   }
-
 
   /// 每秒轮询：获取最新价格（腾讯 HTTP API，返回 UTF-8）
   /// v_{code}="1~名称~代码~现价~昨收~今开~成交量~外盘~内盘~买一价~买一量~
@@ -192,7 +230,7 @@ class StockProvider extends ChangeNotifier {
         _parseTencentResponse(body);
       }
     } catch (e) {
-      debugPrint('Poll error: $e');
+      _log('poll', 'Poll error: $e');
     }
   }
 
@@ -209,7 +247,7 @@ class StockProvider extends ChangeNotifier {
       final code = m[1]!;
       final f = m[2]!.split('~');
       if (f.length < 36) {
-        debugPrint('Tencent skip $code: fields=${f.length}');
+        _log('poll', 'Tencent skip $code: fields=${f.length}');
         continue;
       }
       final price     = double.tryParse(f[3])  ?? 0; // 现价
@@ -256,42 +294,58 @@ class StockProvider extends ChangeNotifier {
         matched++;
       }
     }
-    debugPrint('Tencent matched=$matched/${_stocks.length}');
+    _log('poll', 'Tencent matched=$matched/${_stocks.length}');
     if (changed) notifyListeners();
   }
 
   /// 定时播报：按间隔循环播报所有股票，直到用户关闭
   /// 由 _reportTimer 定时器调用
   Future<void> _reportAll() async {
-    if (_stocks.isEmpty || _isReporting) return;
+    _log('report', '_reportAll triggered: _speaking=$_speaking, _isReporting=$_isReporting, stocks=${_stocks.length}');
+    if (_stocks.isEmpty) {
+      _log('report', '_reportAll: no stocks, skip');
+      return;
+    }
+    if (_isReporting) {
+      _log('report', '_reportAll: already reporting, skip');
+      return;
+    }
     _isReporting = true;
     try {
       bool anySkipped = false;
       for (final s in _stocks.values) {
         // 用户关闭播报时立即退出
         if (!_speaking) {
-          debugPrint('TTS stopped by user');
+          _log('report', '_reportAll: user stopped, exit loop');
           return;
         }
         if (s.price <= 0) {
-          debugPrint('TTS skip ${s.name}: price=${s.price} (数据未就绪)');
+          _log('report', 'TTS skip ${s.name}: price=${s.price} (数据未就绪)');
           anySkipped = true;
           continue;
         }
         final dir = s.changePct >= 0 ? '涨' : '跌';
         final text = '${s.name}，报${s.price.toStringAsFixed(2)}元，$dir${s.changePct.abs().toStringAsFixed(2)}%';
+        _log('report', '_reportAll: about to speak "$text"');
         await _speakAndNotify(text, AlertType.selfQuote);
-        if (!_speaking) return;
+        if (!_speaking) {
+          _log('report', '_reportAll: stopped mid-loop after speak');
+          return;
+        }
         // 播报间隔（等待上一句播完 + 短暂停顿）
         await Future.delayed(const Duration(milliseconds: 800));
-        if (!_speaking) return;
+        if (!_speaking) {
+          _log('report', '_reportAll: stopped mid-loop after delay');
+          return;
+        }
       }
       if (anySkipped && _stocks.values.every((s) => s.price <= 0)) {
         _lastError = ReportError('行情数据未就绪，请检查网络后重试');
         notifyListeners();
       }
+      _log('report', '_reportAll: completed one round');
     } catch (e) {
-      debugPrint('TTS _reportAll error: $e');
+      _log('report', 'TTS _reportAll error: $e');
     } finally {
       _isReporting = false;
     }
@@ -299,6 +353,7 @@ class StockProvider extends ChangeNotifier {
 
   /// 停止播报（用户点击停止按钮）
   Future<void> stopSpeaking() async {
+    _log('report', 'stopSpeaking: _speaking=false, cancelling timer');
     _speaking = false;
     _reportTimer?.cancel();
     _reportTimer = null;
@@ -315,10 +370,12 @@ class StockProvider extends ChangeNotifier {
 
     // TTS 语音播报（speak 内部已处理所有异常，抛出的都是需要用户感知的）
     try {
+      _log('report', '_speakAndNotify: calling _tts.speak("$text")');
       await _tts.speak(text);
       _lastError = null;
+      _log('report', '_speakAndNotify: _tts.speak completed normally');
     } on TtsException catch (e) {
-      debugPrint('TTS speak failed: $e');
+      _log('report', 'TTS speak failed: $e');
       _lastError = ReportError(e.message);
       notifyListeners();
       return; // 跳过本次播报，继续下一只
@@ -338,8 +395,48 @@ class StockProvider extends ChangeNotifier {
     return _lastError;
   }
 
+  // ═══════════════════════════════════════════
+  // App 生命周期监听（WidgetBindingObserver）
+  // 关键：检测熄屏/切后台是否导致定时器被暂停
+  // ═══════════════════════════════════════════
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _appLifecycle = state;
+    _log('lifecycle', 'AppLifecycleState changed: $state, _speaking=$_speaking, _reportTimer=${_reportTimer != null}');
+
+    if (state == AppLifecycleState.paused) {
+      // App 进入后台（熄屏/切到其他app）
+      _wasPlayingWhenBackgrounded = _speaking && _tts.isPlaying;
+      _log('lifecycle', 'App PAUSED: wasPlaying=$_wasPlayingWhenBackgrounded, timerAlive=${_reportTimer != null}');
+
+      // 检查 Timer 是否还活着（Android 低内存可能杀掉定时器）
+      // 注意：Flutter 的 Timer 在后台可能被系统暂停，但进程通常不会被杀掉
+      // 如果进程被杀，App 重启后会重新 init()，_speaking 会重置为 false
+    } else if (state == AppLifecycleState.resumed) {
+      _log('lifecycle', 'App RESUMED: wasPlaying=$_wasPlayingWhenBackgrounded, _speaking=$_speaking');
+
+      // 如果 App 被杀掉再重启，_speaking 会是 false（因为 StockProvider 是新实例）
+      // 此时如果之前在播报，App 重启会丢失播报状态，无法自动恢复
+      // 这是正常行为：App 重启后用户需要重新点播放按钮
+
+      // 如果 App 只是被切到后台（进程活着），检查 Timer 是否还在
+      if (_wasPlayingWhenBackgrounded && _speaking) {
+        if (_reportTimer == null) {
+          _log('lifecycle', 'App resumed but _reportTimer is null! Restarting timer.');
+          _reportTimer = Timer.periodic(
+            Duration(seconds: _reportIntervalSec),
+            (_) => _reportAll(),
+          );
+        } else {
+          _log('lifecycle', 'App resumed with timer alive, timer continues normally');
+        }
+      }
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
     _reportTimer?.cancel();
     _tts.dispose();
