@@ -425,8 +425,8 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
           Duration(seconds: _reportIntervalSec),
           (_) => _reportAll(),
         );
-        // 立即触发一次播报
-        _reportTimer!.fire();
+        // 立即触发一次播报（Timer 没有 fire()，手动调用）
+        _reportAll();
         _log('lifecycle', 'App resumed: triggered immediate report');
       } else if (_wasPlayingWhenBackgrounded && _speaking) {
         // TTS 还在播（极端情况），继续等待

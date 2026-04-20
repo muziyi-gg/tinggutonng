@@ -260,9 +260,6 @@ class TtsService with WidgetsBindingObserver {
     }
   }
 
-  /// 检查 TTS 是否在播（用于上层判断是否需要恢复）
-  bool get isPlaying => _state == TtsState.playing;
-
   void _resetAfterTimeout() {
     _safetyTimer?.cancel();
     _safetyTimer = Timer(const Duration(seconds: 10), () {
