@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -19,7 +18,6 @@ class TtsService {
   TtsState _state = TtsState.idle;
   Timer? _safetyTimer;
   String _currentLanguage = 'zh-CN';
-  AudioSession? _session;
   Completer<void>? _speakCompleter;
 
   /// 诊断信息（供调试页面展示）
@@ -49,6 +47,7 @@ class TtsService {
   }
 
   /// 初始化 TTS 引擎（诊断模式：记录所有中间状态）
+  /// 注意：不使用 audio_session，避免覆盖 flutter_tts 自己的后台音频配置。
   Future<void> init() async {
     try {
       _initError = '';
@@ -71,27 +70,34 @@ class TtsService {
             debugPrint('TTS setSharedInstance(false) also failed: $e2');
           }
         }
-
       }
 
-      // iOS 需要 setIosAudioCategory
+      // iOS 需要 setIosAudioCategory，让 TTS 在后台音频中继续播
       if (_isIos) {
-        await _tts.setIosAudioCategory(
-          IosTextToSpeechAudioCategory.playback,
-          [
-            IosTextToSpeechAudioCategoryOptions.allowBluetooth,
-            IosTextToSpeechAudioCategoryOptions.allowBluetoothA2DP,
-            IosTextToSpeechAudioCategoryOptions.mixWithOthers,
-          ],
-          IosTextToSpeechAudioMode.voicePrompt,
-        );
-        debugPrint('TTS iOS audio category set');
+        try {
+          await _tts.setIosAudioCategory(
+            IosTextToSpeechAudioCategory.playback,
+            [
+              IosTextToSpeechAudioCategoryOptions.allowBluetooth,
+              IosTextToSpeechAudioCategoryOptions.allowBluetoothA2DP,
+              IosTextToSpeechAudioCategoryOptions.mixWithOthers,
+            ],
+            IosTextToSpeechAudioMode.voicePrompt,
+          );
+          debugPrint('TTS iOS audio category set');
+        } catch (e) {
+          debugPrint('TTS iOS audio category failed: $e');
+        }
       }
 
-      // 获取可用引擎
+      // 获取可用引擎（Android）
       if (_isAndroid) {
-        _availableEngines = await _tts.getEngines ?? [];
-        debugPrint('TTS available engines: $_availableEngines');
+        try {
+          _availableEngines = await _tts.getEngines ?? [];
+          debugPrint('TTS available engines: $_availableEngines');
+        } catch (e) {
+          debugPrint('TTS getEngines failed: $e');
+        }
       }
 
       // 设置语言
@@ -166,27 +172,6 @@ class TtsService {
         debugPrint('TTS progress: "$text" [$start-$end] word="$word"');
       });
 
-      // 初始化 AudioSession（audio focus + 锁屏保持）
-      _session = await AudioSession.instance;
-      try {
-        await _session!.configure(AudioSessionConfiguration(
-          avAudioSessionCategory: AVAudioSessionCategory.playback,
-          avAudioSessionCategoryOptions:
-              AVAudioSessionCategoryOptions.mixWithOthers,
-          avAudioSessionMode: AVAudioSessionMode.defaultMode,
-          androidAudioAttributes: const AndroidAudioAttributes(
-            contentType: AndroidAudioContentType.speech,
-            usage: AndroidAudioUsage.assistant,
-          ),
-          androidAudioFocusGainType:
-              AndroidAudioFocusGainType.gainTransientMayDuck,
-          androidWillPauseWhenDucked: false,
-        ));
-        debugPrint('AudioSession configured OK');
-      } catch (e) {
-        debugPrint('AudioSession configure failed: $e (non-fatal)');
-      }
-
       debugPrint('TTS init complete successfully');
       _initDone = true;
     } catch (e, st) {
@@ -236,9 +221,6 @@ class TtsService {
     _speakCompleter = Completer<void>();
 
     try {
-      // 激活 AudioSession（锁屏时保持 audio focus）
-      await _session?.setActive(true);
-
       await _tts.speak(text);
       // awaitSpeakCompletion(true) 让 speak() 等待真正播完
       // completion handler 会触发 _completeSpeak()
@@ -266,7 +248,6 @@ class TtsService {
   Future<void> stop() async {
     debugPrint('TTS stop() called');
     await _tts.stop();
-    await _session?.setActive(false);
     _state = TtsState.idle;
     _cancelSafetyTimer();
     _completeSpeak();
@@ -275,6 +256,5 @@ class TtsService {
   void dispose() {
     _cancelSafetyTimer();
     _tts.stop();
-    _session?.setActive(false);
   }
 }
