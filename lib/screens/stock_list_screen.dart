@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:charset_converter/charset_converter.dart';
 import 'package:provider/provider.dart';
 import 'package:http/http.dart' as http;
 import '../providers/stock_provider.dart';
@@ -191,11 +192,12 @@ class _AddStockSheetState extends State<_AddStockSheet> {
 
       if (r.statusCode != 200) return [];
 
-      // 响应是 GBK 编码
+      // 响应是 GBK 编码，使用 charset_converter 解码
       String body;
       try {
-        body = latin1.decode(r.bodyBytes);
+        body = await CharsetConverter.decode('gbk', r.bodyBytes);
       } catch (_) {
+        // 兜底：把非 Latin-1 字节替换为 ? 再解码
         final safe = r.bodyBytes.map((b) => b < 256 ? b : 63).toList();
         body = latin1.decode(safe);
       }
