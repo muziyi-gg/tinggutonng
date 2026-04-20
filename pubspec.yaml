@@ -19,6 +19,7 @@ dependencies:
   intl: ^0.19.0
   cupertino_icons: ^1.0.8
   shared_preferences: ^2.2.3
+  charset_converter: ^2.0.0
 
 dev_dependencies:
   flutter_test:
