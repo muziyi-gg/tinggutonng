@@ -72,17 +72,6 @@ class TtsService {
           }
         }
 
-        // Android: 设置 foreground service 相关的 audio attributes
-        // USAGE_ASSISTANT + CONTENT_TYPE_SPEECH 让系统在锁屏时保留 TTS 音频
-        try {
-          await _tts.setFlutterTtsOption('androidParams', {
-            'android:key_speech_volume': '0.9f',
-            'android:key_speech_pitch': '1.0f',
-            'android:key_speech_rate': '0.85f',
-          });
-        } catch (e) {
-          debugPrint('TTS setFlutterTtsOption androidParams: $e');
-        }
       }
 
       // iOS 需要 setIosAudioCategory
