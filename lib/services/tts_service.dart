@@ -30,11 +30,14 @@ TtsLogCallback? _externalLogCallback;
 
 class TtsService with WidgetsBindingObserver {
   final FlutterTts _tts = FlutterTts();
+  static const _serviceChannel = MethodChannel('com.tingutong.app/tts_service');
+  bool _isServiceRunning = false;
   TtsState _state = TtsState.idle;
   Timer? _safetyTimer;
   String _currentLanguage = 'zh-CN';
   Completer<void>? _speakCompleter;
   String? _lastSpeakingText;
+  Timer? _stopServiceTimer;
 
   /// 调试事件日志（最多保留100条）
   final List<TtsLifecycleEvent> _debugLog = [];
@@ -284,8 +287,25 @@ class TtsService with WidgetsBindingObserver {
   }
 
   Future<void> _ensureAudioSession() async {
-    // flutter_tts 4.0.2 不暴露音频焦点 API，保持现状即可
-    // setSharedInstance(true) 已确保 TTS 实例跨生命周期保持
+    if (!_isAndroid) return;
+    try {
+      // 启动前台服务保持 App 后台活跃，防止 TTS 被系统杀死
+      await _serviceChannel.invokeMethod('startForegroundService');
+      _isServiceRunning = true;
+      _log('debug', 'ForegroundService started');
+      // 重置停止计时器（如果有的话）
+      _stopServiceTimer?.cancel();
+      _stopServiceTimer = Timer(const Duration(seconds: 30), () async {
+        // 30s 无新播报则停止前台服务
+        try {
+          await _serviceChannel.invokeMethod('stopForegroundService');
+          _isServiceRunning = false;
+          _log('debug', 'ForegroundService stopped (idle timeout)');
+        } catch (_) {}
+      });
+    } catch (e) {
+      _log('debug', '_ensureAudioSession failed: $e');
+    }
   }
 
   /// 播报文本。抛出 TtsException 表示失败（供 UI 层展示）。
@@ -340,6 +360,10 @@ class TtsService with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _cancelSafetyTimer();
+    _stopServiceTimer?.cancel();
     _tts.stop();
+    if (_isAndroid && _isServiceRunning) {
+      _serviceChannel.invokeMethod('stopForegroundService').catchError((_) {});
+    }
   }
 }

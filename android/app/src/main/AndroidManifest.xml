@@ -43,6 +43,13 @@
             </intent-filter>
         </activity>
 
+        <!-- TTS 前台服务 -->
+        <service
+            android:name=".TtsForegroundService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
         <!-- 启动接收器 -->
         <receiver
             android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
