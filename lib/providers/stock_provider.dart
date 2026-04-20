@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:charset_converter/charset_converter.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/stock.dart';
@@ -185,7 +186,9 @@ class StockProvider extends ChangeNotifier {
         },
       ).timeout(const Duration(seconds: 8));
       if (r.statusCode == 200) {
-        _parseTencentResponse(r.body);
+        // 腾讯 API 返回 GBK 编码，需要正确解码
+        final body = await CharsetConverter.decode('gbk', r.bodyBytes);
+        _parseTencentResponse(body);
       }
     } catch (e) {
       debugPrint('Poll error: $e');
