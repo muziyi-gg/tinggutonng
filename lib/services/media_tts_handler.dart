@@ -10,7 +10,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 /// 这样锁屏、切换 App 时系统不会杀死 TTS 音频。
 class MediaTtsHandler {
   final FlutterTts _tts;
-  AudioHandler? _audioHandler;
+  BaseAudioHandler? _audioHandler;
   AudioSession? _session;
   bool _initialized = false;
   final _ttsCompleter = Completer<void>();
@@ -26,12 +26,12 @@ class MediaTtsHandler {
     if (_initialized) return;
     try {
       _session = await AudioSession.instance;
-      await _session!.configure(const AudioSessionConfiguration(
+      await _session!.configure(AudioSessionConfiguration(
         avAudioSessionCategory: AVAudioSessionCategory.playback,
         avAudioSessionCategoryOptions:
             AVAudioSessionCategoryOptions.mixWithOthers,
         avAudioSessionMode: AVAudioSessionMode.defaultMode,
-        androidAudioAttributes: AndroidAudioAttributes(
+        androidAudioAttributes: const AndroidAudioAttributes(
           contentType: AndroidAudioContentType.speech,
           usage: AndroidAudioUsage.assistant,
         ),
@@ -67,7 +67,9 @@ class MediaTtsHandler {
       return;
     }
     try {
-      await _audioHandler!.speak(text);
+      // speak() 在 BaseAudioHandler 上，AudioHandler 没有此方法
+      final handler = _audioHandler as BaseAudioHandler;
+      await handler.speak(text);
     } catch (e) {
       debugPrint('MediaTtsHandler speak error: $e, fallback to direct TTS');
       await _tts.speak(text);
@@ -80,7 +82,8 @@ class MediaTtsHandler {
       return;
     }
     try {
-      await _audioHandler!.stop();
+      final handler = _audioHandler as BaseAudioHandler;
+      await handler.stop();
     } catch (e) {
       debugPrint('MediaTtsHandler stop error: $e');
       await _tts.stop();
