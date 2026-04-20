@@ -74,8 +74,9 @@ class StockProvider extends ChangeNotifier {
       }
       if (_stocks.isNotEmpty) {
         _ensureWatchRunning();
-        // 立即获取一次价格
-        _pollPricesLive();
+        // 同步等待第一次价格获取完成，确保内存中已有实时价格
+        // 这样 App 重启后界面立即显示正确价格，而非等待1秒轮询
+        await _pollPricesLive();
       }
     } catch (e) {
       debugPrint('_loadStocks error: $e');
