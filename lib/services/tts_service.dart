@@ -131,6 +131,21 @@ class TtsService with WidgetsBindingObserver {
             _log('debug', 'TTS setSharedInstance(false) also failed: $e2');
           }
         }
+        // 配置 Android 音频会话：允许后台播放 + 音频焦点策略
+        // AUDIOFOCUS_GAIN = 获取永久音频焦点，其他音频会被压低（但不打断 TTS）
+        try {
+          await _tts.setAudioFocusRequest('AUDIOFOCUS_GAIN');
+          _log('debug', 'TTS setAudioFocusRequest(AUDIOFOCUS_GAIN) OK');
+        } catch (e) {
+          _log('debug', 'TTS setAudioFocusRequest not available: $e');
+        }
+        // 禁用自动暂停：防止系统因其他音频事件自动停止 TTS
+        try {
+          await _tts.setAutoPause(false);
+          _log('debug', 'TTS setAutoPause(false) OK');
+        } catch (e) {
+          _log('debug', 'TTS setAutoPause not available: $e');
+        }
       }
 
       // iOS 需要 setIosAudioCategory，让 TTS 在后台音频中继续播
@@ -285,8 +300,20 @@ class TtsService with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _ensureAudioSession() async {
+    if (!_isAndroid && !_isIos) return;
+    try {
+      // 每次播报前确保音频会话已激活，防止熄屏被系统回收
+      await _tts.setAudioFocusRequest('AUDIOFOCUS_GAIN');
+      _log('debug', '_ensureAudioSession: AUDIOFOCUS_GAIN acquired');
+    } catch (e) {
+      _log('debug', '_ensureAudioSession failed: $e');
+    }
+  }
+
   /// 播报文本。抛出 TtsException 表示失败（供 UI 层展示）。
   Future<void> speak(String text) async {
+    await _ensureAudioSession();
     _log('tts_event', 'speak() called: "$text", current state=$_state, appLifecycle=$_appLifecycle');
     _lastErrorMessage = null;
     _lastPlatformCode = null;
