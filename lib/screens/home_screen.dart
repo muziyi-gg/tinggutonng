@@ -80,21 +80,25 @@ class HomeScreen extends StatelessWidget {
         ),
       ),
       SliverToBoxAdapter(child: _sectionTitle('我的自选', onSeeAll: onNavigateStocks)),
-      if (stocks.isEmpty)
-        const SliverToBoxAdapter(child: _EmptyState())
-      else
-        SliverPadding(
-          padding: const EdgeInsets.symmetric(horizontal:16),
-          sliver: SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (ctx, i) => Padding(
-                padding: const EdgeInsets.only(bottom:10),
-                child: StockCard(stock: stocks[i]),
+      Consumer<StockProvider>(
+        builder: (ctx, sp, _) {
+          final list = sp.stockList;
+          if (list.isEmpty)
+            return const SliverToBoxAdapter(child: _EmptyState());
+          return SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal:16),
+            sliver: SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (ctx, i) => Padding(
+                  padding: const EdgeInsets.only(bottom:10),
+                  child: StockCard(stock: list[i]),
+                ),
+                childCount: list.length > 5 ? 5 : list.length,
               ),
-              childCount: stocks.length > 5 ? 5 : stocks.length,
             ),
-          ),
-        ),
+          );
+        },
+      ),
       SliverToBoxAdapter(child: _buildMonitorEntry()),
       Consumer<StockProvider>(
         builder: (ctx, sp, _) {
