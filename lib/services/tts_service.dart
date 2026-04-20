@@ -1,8 +1,8 @@
 import 'dart:async';
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
-import 'media_tts_handler.dart';
 
 enum TtsState { idle, playing, stopped, error }
 
@@ -19,9 +19,7 @@ class TtsService {
   TtsState _state = TtsState.idle;
   Timer? _safetyTimer;
   String _currentLanguage = 'zh-CN';
-
-  /// MediaTtsHandler：把 TTS 封装成 foreground service（锁屏/切App时继续播）
-  late final MediaTtsHandler _mediaHandler;
+  AudioSession? _session;
   Completer<void>? _speakCompleter;
 
   /// 诊断信息（供调试页面展示）
@@ -72,6 +70,18 @@ class TtsService {
           } catch (e2) {
             debugPrint('TTS setSharedInstance(false) also failed: $e2');
           }
+        }
+
+        // Android: 设置 foreground service 相关的 audio attributes
+        // USAGE_ASSISTANT + CONTENT_TYPE_SPEECH 让系统在锁屏时保留 TTS 音频
+        try {
+          await _tts.setFlutterTtsOption('androidParams', {
+            'android:key_speech_volume': '0.9f',
+            'android:key_speech_pitch': '1.0f',
+            'android:key_speech_rate': '0.85f',
+          });
+        } catch (e) {
+          debugPrint('TTS setFlutterTtsOption androidParams: $e');
         }
       }
 
@@ -129,7 +139,7 @@ class TtsService {
       await _tts.setVolume(1.0);
       await _tts.setPitch(1.0);
 
-      // 设置 TTS 回调（completion/error/cancel → 通知 _speakCompleter）
+      // 设置 TTS 回调
       _tts.setStartHandler(() {
         debugPrint('TTS handler: start');
         _state = TtsState.playing;
@@ -167,9 +177,27 @@ class TtsService {
         debugPrint('TTS progress: "$text" [$start-$end] word="$word"');
       });
 
-      // 初始化 foreground service handler（锁屏/切App时继续播）
-      _mediaHandler = MediaTtsHandler(_tts);
-      await _mediaHandler.init();
+      // 初始化 AudioSession（audio focus + 锁屏保持）
+      _session = await AudioSession.instance;
+      try {
+        await _session!.configure(AudioSessionConfiguration(
+          avAudioSessionCategory: AVAudioSessionCategory.playback,
+          avAudioSessionCategoryOptions:
+              AVAudioSessionCategoryOptions.mixWithOthers,
+          avAudioSessionMode: AVAudioSessionMode.defaultMode,
+          androidAudioAttributes: const AndroidAudioAttributes(
+            contentType: AndroidAudioContentType.speech,
+            usage: AndroidAudioUsage.assistant,
+          ),
+          androidAudioFocusGainType:
+              AndroidAudioFocusGainType.gainTransientMayDuck,
+          androidWillPauseWhenDucked: false,
+        ));
+        debugPrint('AudioSession configured OK');
+      } catch (e) {
+        debugPrint('AudioSession configure failed: $e (non-fatal)');
+      }
+
       debugPrint('TTS init complete successfully');
       _initDone = true;
     } catch (e, st) {
@@ -205,7 +233,6 @@ class TtsService {
   }
 
   /// 播报文本。抛出 TtsException 表示失败（供 UI 层展示）。
-  /// 锁屏和切换 App 时通过 foreground service 保持播报。
   Future<void> speak(String text) async {
     debugPrint('TTS speak() called: "$text", current state=$_state');
     _lastErrorMessage = null;
@@ -220,11 +247,12 @@ class TtsService {
     _speakCompleter = Completer<void>();
 
     try {
-      // 通过 MediaTtsHandler 走 foreground service
-      await _mediaHandler.speak(text);
-      // 等待 TTS 真正播完（completion handler 会 complete _speakCompleter）
-      // 注意：如果 audio_service 初始化失败，speak() 内部会直接调用 flutter_tts
-      // flutter_tts 的 awaitSpeakCompletion(true) 让 speak() 本身就会等播完
+      // 激活 AudioSession（锁屏时保持 audio focus）
+      await _session?.setActive(true);
+
+      await _tts.speak(text);
+      // awaitSpeakCompletion(true) 让 speak() 等待真正播完
+      // completion handler 会触发 _completeSpeak()
     } on PlatformException catch (e) {
       debugPrint('TTS PlatformException: code=${e.code} message=${e.message}');
       _state = TtsState.error;
@@ -248,7 +276,8 @@ class TtsService {
 
   Future<void> stop() async {
     debugPrint('TTS stop() called');
-    await _mediaHandler.stop();
+    await _tts.stop();
+    await _session?.setActive(false);
     _state = TtsState.idle;
     _cancelSafetyTimer();
     _completeSpeak();
@@ -256,7 +285,7 @@ class TtsService {
 
   void dispose() {
     _cancelSafetyTimer();
-    _mediaHandler.dispose();
     _tts.stop();
+    _session?.setActive(false);
   }
 }
