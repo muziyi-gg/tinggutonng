@@ -5,19 +5,15 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
 /// 把 flutter_tts 封装成 foreground service（类似音乐 App）的处理器。
-/// 机制：用 AudioPlayer 持有 foreground service 槽位（播放一段静音音频），
-/// 在此期间 flutter_tts 的输出通过 AudioSession 的 audio focus 保持活动。
-/// 这样锁屏、切换 App 时系统不会杀死 TTS 音频。
+/// 使用 TextHandler（TTS 专用），锁屏/切 App 时系统保持 TTS 音频。
 class MediaTtsHandler {
   final FlutterTts _tts;
-  BaseAudioHandler? _audioHandler;
+  TextHandler? _audioHandler;
   AudioSession? _session;
   bool _initialized = false;
-  final _ttsCompleter = Completer<void>();
-
-  /// TTS 播报完成回调（TTSActualCompletion 是我们的补充信号）
-  void Function()? onTtsComplete;
-  void Function(String)? onTtsError;
+  StreamSubscription? _speakSub;
+  StreamSubscription? _stateSub;
+  Completer<void>? _speakCompleter;
 
   MediaTtsHandler(this._tts);
 
@@ -40,9 +36,9 @@ class MediaTtsHandler {
         androidWillPauseWhenDucked: false,
       ));
 
-      // 初始化 AudioService（后台前台服务）
+      // TextHandler 是 TTS 专用 handler，有 speak() 方法
       _audioHandler = await AudioService.init(
-        builder: () => _TtsAudioHandler(_tts, onTtsComplete, onTtsError),
+        builder: () => TextHandler(),
         config: const AudioServiceConfig(
           androidNotificationChannelId: 'com.tingutong.app.audio',
           androidNotificationChannelName: '听股通语音播报',
@@ -52,24 +48,40 @@ class MediaTtsHandler {
         ),
       );
 
+      // 一次性设置监听器，不要每次 speak 都加新的
+      _speakSub = _audioHandler!.onWillSpeak.listen((text) {
+        debugPrint('TextHandler onWillSpeak: "$text"');
+        _tts.speak(text);
+      });
+
+      _stateSub = _audioHandler!.playbackState.listen((state) {
+        debugPrint('TextHandler playbackState: playing=${state.playing} processing=${state.processingState}');
+        if (state.processingState == AudioProcessingState.idle && !state.playing) {
+          if (_speakCompleter != null && !_speakCompleter!.isCompleted) {
+            _speakCompleter!.complete();
+          }
+        }
+      });
+
       _initialized = true;
       debugPrint('MediaTtsHandler init OK');
-    } catch (e) {
-      debugPrint('MediaTtsHandler init failed: $e');
-      // 不阻塞，fallback 到普通模式
+    } catch (e, st) {
+      debugPrint('MediaTtsHandler init failed: $e\n$st');
+      _initialized = false;
     }
   }
 
   Future<void> speak(String text) async {
     if (!_initialized || _audioHandler == null) {
-      // fallback：直接用 flutter_tts
+      debugPrint('MediaTtsHandler: not initialized, fallback to direct TTS');
       await _tts.speak(text);
       return;
     }
+    _speakCompleter = Completer<void>();
     try {
-      // speak() 在 BaseAudioHandler 上，AudioHandler 没有此方法
-      final handler = _audioHandler as BaseAudioHandler;
-      await handler.speak(text);
+      await _audioHandler!.speak(text);
+      // await 直到 playbackState 变为 idle
+      await _speakCompleter!.future;
     } catch (e) {
       debugPrint('MediaTtsHandler speak error: $e, fallback to direct TTS');
       await _tts.speak(text);
@@ -82,8 +94,10 @@ class MediaTtsHandler {
       return;
     }
     try {
-      final handler = _audioHandler as BaseAudioHandler;
-      await handler.stop();
+      await _audioHandler!.stop();
+      if (_speakCompleter != null && !_speakCompleter!.isCompleted) {
+        _speakCompleter!.complete();
+      }
     } catch (e) {
       debugPrint('MediaTtsHandler stop error: $e');
       await _tts.stop();
@@ -91,69 +105,13 @@ class MediaTtsHandler {
   }
 
   Future<void> dispose() async {
+    await _speakSub?.cancel();
+    await _stateSub?.cancel();
     if (_audioHandler != null) {
-      await _audioHandler!.stop();
+      try {
+        await _audioHandler!.stop();
+      } catch (_) {}
     }
     _initialized = false;
-  }
-}
-
-/// AudioService 的 Handler 实现，把 speak() 调用路由到 flutter_tts
-class _TtsAudioHandler extends BaseAudioHandler with SeekHandler {
-  final FlutterTts _tts;
-  void Function()? onTtsComplete;
-  void Function(String)? onTtsError;
-
-  _TtsAudioHandler(this._tts, this.onTtsComplete, this.onTtsError);
-
-  @override
-  Future<void> speak(String text) async {
-    // 先停止当前播报
-    await _tts.stop();
-
-    _tts.setStartHandler(() {
-      debugPrint('TTS-AudioHandler: start');
-      playbackState.add(playbackState.value.copyWith(
-        playing: true,
-        processingState: AudioProcessingState.ready,
-      ));
-    });
-
-    _tts.setCompletionHandler(() {
-      debugPrint('TTS-AudioHandler: completion');
-      playbackState.add(playbackState.value.copyWith(
-        playing: false,
-        processingState: AudioProcessingState.idle,
-      ));
-      onTtsComplete?.call();
-    });
-
-    _tts.setErrorHandler((e) {
-      debugPrint('TTS-AudioHandler error: $e');
-      playbackState.add(playbackState.value.copyWith(
-        playing: false,
-        processingState: AudioProcessingState.error,
-      ));
-      onTtsError?.call(e.toString());
-    });
-
-    final result = await _tts.speak(text);
-    if (result != 1) {
-      debugPrint('TTS speak() returned $result');
-    }
-  }
-
-  @override
-  Future<void> stop() async {
-    await _tts.stop();
-    playbackState.add(playbackState.value.copyWith(
-      playing: false,
-      processingState: AudioProcessingState.idle,
-    ));
-  }
-
-  @override
-  Future<void> onClick(MediaButton button) async {
-    await stop();
   }
 }
