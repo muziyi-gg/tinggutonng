@@ -24,12 +24,17 @@ class TtsLifecycleEvent {
   String toString() => '[${ts.toString().substring(11, 19)}] [$type] $message';
 }
 
+/// 外部注入的日志回调（由 StockProvider 注入，用于合并 TTS 日志到 SP.debugLog）
+typedef TtsLogCallback = void Function(String tag, String msg);
+TtsLogCallback? _externalLogCallback;
+
 class TtsService with WidgetsBindingObserver {
   final FlutterTts _tts = FlutterTts();
   TtsState _state = TtsState.idle;
   Timer? _safetyTimer;
   String _currentLanguage = 'zh-CN';
   Completer<void>? _speakCompleter;
+  String? _lastSpeakingText;
 
   /// 调试事件日志（最多保留100条）
   final List<TtsLifecycleEvent> _debugLog = [];
@@ -58,11 +63,36 @@ class TtsService with WidgetsBindingObserver {
   bool get initDone => _initDone;
   AppLifecycleState get appLifecycle => _appLifecycle;
   List<TtsLifecycleEvent> get debugLog => List.unmodifiable(_debugLog);
+  bool get isPlaying => _state == TtsState.playing;
+
+  /// 注册外部日志回调（由 StockProvider 调用，将 TTS 日志合并到 SP.debugLog）
+  void registerLogCallback(TtsLogCallback callback) {
+    _externalLogCallback = callback;
+    _log('debug', 'TTS log callback registered');
+  }
 
   void _log(String type, String msg) {
     _debugLog.add(TtsLifecycleEvent(type, msg));
     if (_debugLog.length > _maxLogSize) _debugLog.removeAt(0);
-    debugPrint('TTS_LOG [$type] $msg');
+    // 根据事件类型映射细分 tag，方便调试页面分色显示
+    String spTag;
+    if (type == 'tts_event') {
+      if (msg.startsWith('handler START')) spTag = 'TTS.START';
+      else if (msg.startsWith('handler CANCEL')) spTag = 'TTS.CANCEL';
+      else if (msg.startsWith('handler COMPLETION')) spTag = 'TTS.DONE';
+      else if (msg.startsWith('handler ERROR')) spTag = 'TTS.ERROR';
+      else if (msg.startsWith('speak() CALLED')) spTag = 'TTS.SPEAK';
+      else if (msg.startsWith('stop() CALLED')) spTag = 'TTS.STOP';
+      else spTag = 'TTS';
+    } else if (type == 'app_lifecycle') {
+      spTag = 'TTS.APP';
+    } else {
+      spTag = 'TTS';
+    }
+    if (_externalLogCallback != null) {
+      _externalLogCallback!(spTag, msg);
+    }
+    debugPrint('TTS [$spTag] $msg');
   }
 
   void clearLog() => _debugLog.clear();

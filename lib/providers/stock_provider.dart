@@ -67,6 +67,8 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
   ReportError? get lastError => _lastError;
   bool get isSpeaking => _speaking;
   List<DebugLogEntry> get debugLog => List.unmodifiable(_debugLog);
+  AppLifecycleState get appLifecycle => _appLifecycle;
+  bool get ttsIsPlaying => _tts.isPlaying;
 
   void _log(String tag, String msg) {
     _debugLog.add(DebugLogEntry(tag, msg));
@@ -83,6 +85,8 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> init() async {
     WidgetsBinding.instance.addObserver(this);
+    // 将 TTS 内部日志合并到 SP.debugLog，方便调试页面查看完整日志链
+    _tts.registerLogCallback((tag, msg) => _log(tag, msg));
     await _tts.init();
     await _notif.init();
     // 从本地存储恢复自选股（必须等待完成，防止竞态）
@@ -396,40 +400,44 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   // ═══════════════════════════════════════════
+  // ═══════════════════════════════════════════
   // App 生命周期监听（WidgetBindingObserver）
   // 关键：检测熄屏/切后台是否导致定时器被暂停
   // ═══════════════════════════════════════════
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _appLifecycle = state;
-    _log('lifecycle', 'AppLifecycleState changed: $state, _speaking=$_speaking, _reportTimer=${_reportTimer != null}');
 
-    if (state == AppLifecycleState.paused) {
-      // App 进入后台（熄屏/切到其他app）
+    if (state == AppLifecycleState.inactive) {
+      // 记录切后台时是否在播（用于恢复判断）
       _wasPlayingWhenBackgrounded = _speaking && _tts.isPlaying;
+      _log('lifecycle', 'App INACTIVE: wasPlaying=$_wasPlayingWhenBackgrounded, speaking=${_tts.isPlaying}');
+    } else if (state == AppLifecycleState.paused) {
       _log('lifecycle', 'App PAUSED: wasPlaying=$_wasPlayingWhenBackgrounded, timerAlive=${_reportTimer != null}');
-
-      // 检查 Timer 是否还活着（Android 低内存可能杀掉定时器）
-      // 注意：Flutter 的 Timer 在后台可能被系统暂停，但进程通常不会被杀掉
-      // 如果进程被杀，App 重启后会重新 init()，_speaking 会重置为 false
     } else if (state == AppLifecycleState.resumed) {
-      _log('lifecycle', 'App RESUMED: wasPlaying=$_wasPlayingWhenBackgrounded, _speaking=$_speaking');
+      _log('lifecycle', 'App RESUMED: wasPlaying=$_wasPlayingWhenBackgrounded, speaking=${_tts.isPlaying}, _speaking=$_speaking');
 
-      // 如果 App 被杀掉再重启，_speaking 会是 false（因为 StockProvider 是新实例）
-      // 此时如果之前在播报，App 重启会丢失播报状态，无法自动恢复
-      // 这是正常行为：App 重启后用户需要重新点播放按钮
-
-      // 如果 App 只是被切到后台（进程活着），检查 Timer 是否还在
-      if (_wasPlayingWhenBackgrounded && _speaking) {
-        if (_reportTimer == null) {
-          _log('lifecycle', 'App resumed but _reportTimer is null! Restarting timer.');
-          _reportTimer = Timer.periodic(
-            Duration(seconds: _reportIntervalSec),
-            (_) => _reportAll(),
-          );
-        } else {
-          _log('lifecycle', 'App resumed with timer alive, timer continues normally');
-        }
+      // 自动恢复机制：如果之前在播但 TTS 被系统中断停止，立即重启播报周期
+      if (_wasPlayingWhenBackgrounded && _speaking && !_tts.isPlaying) {
+        _log('lifecycle', 'App resumed: TTS was interrupted, restarting report cycle immediately');
+        _reportTimer?.cancel();
+        _reportTimer = Timer.periodic(
+          Duration(seconds: _reportIntervalSec),
+          (_) => _reportAll(),
+        );
+        // 立即触发一次播报
+        _reportTimer!.fire();
+        _log('lifecycle', 'App resumed: triggered immediate report');
+      } else if (_wasPlayingWhenBackgrounded && _speaking) {
+        // TTS 还在播（极端情况），继续等待
+        _log('lifecycle', 'App resumed: TTS still playing, will continue');
+      } else if (_reportTimer == null && _speaking) {
+        // 定时器丢失（极端情况），重启
+        _log('lifecycle', 'App resumed: _reportTimer is null! Restarting timer.');
+        _reportTimer = Timer.periodic(
+          Duration(seconds: _reportIntervalSec),
+          (_) => _reportAll(),
+        );
       }
     }
   }

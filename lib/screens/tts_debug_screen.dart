@@ -122,9 +122,9 @@ class _TtsDebugScreenState extends State<TtsDebugScreen> {
         Icon(Icons.phone_android, color: Colors.blue[700], size: 20),
         const SizedBox(width: 8),
         Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('App 生命周期: ${_lifecycleName(sp.debugLog.isNotEmpty ? sp.debugLog.last.ts : DateTime.now())}',
+          Text('App 生命周期: ${sp.appLifecycle.name}（${_timeAgo(sp)}）',
               style: TextStyle(fontSize: 12, color: Colors.blue[700])),
-          Text('播报状态: _speaking=${sp.isSpeaking} | TTS播放中=${sp.debugLog.any((e) => e.msg.contains('START'))}',
+          Text('播报状态: _speaking=${sp.isSpeaking} | TTS播放中=${sp.ttsIsPlaying}',
               style: TextStyle(fontSize: 11, color: Colors.blue[600])),
           Text('计时器活跃: ${sp.debugLog.any((e) => e.tag == 'lifecycle' && e.msg.contains('timer'))}',
               style: TextStyle(fontSize: 11, color: Colors.blue[600])),
@@ -133,11 +133,12 @@ class _TtsDebugScreenState extends State<TtsDebugScreen> {
     );
   }
 
-  String _lifecycleName(DateTime ts) {
-    final diff = DateTime.now().difference(ts);
-    if (diff.inSeconds < 5) return 'resumed（刚刚）';
-    if (diff.inSeconds < 30) return 'resumed（${diff.inSeconds}秒前）';
-    return 'paused（${diff.inSeconds}秒前）';
+  String _timeAgo(StockProvider sp) {
+    if (sp.debugLog.isEmpty) return '刚刚';
+    final diff = DateTime.now().difference(sp.debugLog.last.ts);
+    if (diff.inSeconds < 5) return '刚刚';
+    if (diff.inSeconds < 60) return '${diff.inSeconds}秒前';
+    return '${diff.inMinutes}分前';
   }
 
   void _addLog(String msg) {
@@ -149,7 +150,8 @@ class _TtsDebugScreenState extends State<TtsDebugScreen> {
   Widget _logLine(dynamic e) {
     Color tagColor;
     IconData tagIcon;
-    switch (e.tag) {
+    final tag = e.tag as String;
+    switch (tag) {
       case 'lifecycle':
         tagColor = Colors.orange;
         tagIcon = Icons.phone_android;
@@ -163,6 +165,13 @@ class _TtsDebugScreenState extends State<TtsDebugScreen> {
         tagIcon = Icons.cloud;
         break;
       case 'TTS':
+      case 'TTS.START':
+      case 'TTS.CANCEL':
+      case 'TTS.DONE':
+      case 'TTS.ERROR':
+      case 'TTS.SPEAK':
+      case 'TTS.STOP':
+      case 'TTS.APP':
         tagColor = Colors.blue;
         tagIcon = Icons.volume_up;
         break;
