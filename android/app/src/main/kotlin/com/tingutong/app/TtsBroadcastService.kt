@@ -102,7 +102,7 @@ class TtsBroadcastService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "TtsBroadcastService onCreate")
+        android.util.Log.d(TAG, ">>> TtsBroadcastService onCreate")
 
         // ─── 1. 创建通知渠道 ───
         createNotificationChannel()
@@ -120,7 +120,7 @@ class TtsBroadcastService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d(TAG, "onStartCommand action=${intent?.action}")
+        android.util.Log.d(TAG, ">>> TtsBroadcastService onStartCommand: action=${intent?.action}")
 
         when (intent?.action) {
             ACTION_STOP -> {

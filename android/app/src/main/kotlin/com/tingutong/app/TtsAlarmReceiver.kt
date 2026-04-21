@@ -81,9 +81,14 @@ class TtsAlarmReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        Log.d(TAG, "Alarm triggered! Action=${intent.action}")
+        android.util.Log.d(TAG, ">>> TtsAlarmReceiver onReceive: action=${intent.action}")
 
-        if (intent.action != ACTION_TTS_ALARM) return
+        if (intent.action != ACTION_TTS_ALARM) {
+            android.util.Log.d(TAG, ">>> TtsAlarmReceiver: unknown action, return")
+            return
+        }
+
+        android.util.Log.d(TAG, ">>> TtsAlarmReceiver: starting TtsBroadcastService")
 
         // 启动前台服务执行 TTS 播报
         // 注意：这里 Intent 只带 action，播报内容从 SharedPreferences 读取

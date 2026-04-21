@@ -125,6 +125,7 @@ class MainActivity : FlutterActivity() {
             .putString(KEY_STOCK_CODES, stockCodesJson)
             .putBoolean(KEY_BACKGROUND_ACTIVE, true)
             .apply()
+        android.util.Log.d("MainActivity", ">>> saveReportingConfig: interval=$intervalSec, namesLen=${stockNamesJson.length}, codesLen=${stockCodesJson.length}, active=true")
     }
 
     private fun clearReportingConfig() {
@@ -151,22 +152,29 @@ class MainActivity : FlutterActivity() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val triggerTime = System.currentTimeMillis() + (intervalSec * 1000L)
-
         // Android 12+ 检查精确闹钟权限
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (!alarmManager.canScheduleExactAlarms()) {
                 android.util.Log.w("MainActivity", "SCHEDULE_EXACT_ALARM permission not granted")
+                android.util.Log.d("MainActivity", "scheduleNextReport: SKIPPED (no permission)")
                 return
+            } else {
+                android.util.Log.d("MainActivity", "SCHEDULE_EXACT_ALARM permission OK")
             }
         }
+
+        val triggerTime = System.currentTimeMillis() + (intervalSec * 1000L)
+        val triggerDate = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date(triggerTime))
+        android.util.Log.d("MainActivity", "scheduleNextReport: calling setExactAndAllowWhileIdle, now=${System.currentTimeMillis()/1000}s, trigger=${triggerTime/1000}s ($triggerDate), interval=${intervalSec}s")
 
         alarmManager.setExactAndAllowWhileIdle(
             AlarmManager.RTC_WAKEUP,
             triggerTime,
             pendingIntent
         )
-        android.util.Log.d("MainActivity", "Alarm scheduled in ${intervalSec}s")
+        android.util.Log.d("MainActivity", "scheduleNextReport: setExactAndAllowWhileIdle called OK")
+
+        android.util.Log.d("MainActivity", "scheduleNextReport: done, scheduling next at $triggerDate")
     }
 
     /**
