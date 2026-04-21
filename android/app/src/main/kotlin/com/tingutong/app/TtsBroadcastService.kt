@@ -3,26 +3,33 @@ package com.tingutong.app
 import android.app.*
 import android.content.Context
 import android.content.Intent
-import android.content.SharedPreferences
+import android.graphics.BitmapFactory
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import android.media.MediaSession
 import android.os.Build
 import android.os.PowerManager
-import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.media.app.NotificationCompat.MediaStyle
 import org.json.JSONArray
 import java.util.*
 
 /**
- * Android 原生前台服务，使用系统 TextToSpeech 执行播报。
- *
- * 相比 Flutter flutter_tts 的优势：
- * - 不依赖 Dart isolate，在 Flutter 被系统暂停时仍能正常工作
- * - 使用 PARTIAL_WAKE_LOCK 保证 CPU 持续工作到播报完成
+ * Android 原生前台服务，模拟音频类 App 行为：
+ * - foregroundServiceType="mediaPlayback"
+ * - MediaSession 注册到系统媒体控制器
+ * - 请求音频焦点，防止与其他音乐/导航 App 冲突
+ * - 使用 PARTIAL_WAKE_LOCK 保证熄屏时 CPU 持续工作
  *
  * 触发路径：
- *   TtsAlarmReceiver.onReceive() → startForegroundService(this)
- *   → TtsBroadcastService.onStartCommand() → TextToSpeech.speak()
+ *   AlarmManager → TtsAlarmReceiver.onReceive()
+ *   → startForegroundService(this) → TextToSpeech.speak()
  */
 class TtsBroadcastService : Service() {
 
@@ -32,17 +39,17 @@ class TtsBroadcastService : Service() {
         const val ACTION_STOP = "com.tingutong.app.ACTION_STOP_TTS_SERVICE"
 
         const val CHANNEL_ID = "tingutong_tts_channel"
+        const val CHANNEL_NAME = "听股通播报服务"
         const val NOTIFICATION_ID = 20002
 
-        // SharedPreferences keys（与 Flutter stock_provider 保持一致）
         private const val PREFS_NAME = "FlutterSharedPreferences"
-        private const val KEY_WATCHLIST = "flutter.VGhpZ1VuaXQyX3ZhMg==" // watchlist_v2 base64 encoded
+        private const val KEY_WATCHLIST = "flutter.VGhpZ1VuaXQyX3ZhMg=="
         private const val KEY_REPORT_INTERVAL = "tingutong_report_interval"
-        private const val KEY_STOCK_NAMES = "tingutong_stock_names" // JSON: {"code": "name", ...}
+        private const val KEY_STOCK_NAMES = "tingutong_stock_names"
 
         private const val WAKE_LOCK_TAG = "Tingutong:TTSWakeLock"
+        private const val MEDIA_SESSION_TAG = "TingutongTTS"
 
-        // 播报间隔（秒），熄屏时由 AlarmManager 精确控制
         var defaultIntervalSec = 60
 
         fun stopService(context: Context) {
@@ -56,15 +63,58 @@ class TtsBroadcastService : Service() {
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private var wakeLock: PowerManager.WakeLock? = null
-    private var pendingAlarms: MutableList<String> = mutableListOf()
     private var speakQueue: MutableList<String> = mutableListOf()
     private var currentIndex = 0
     private var reportInterval = 60
 
+    // ─── 音频焦点 & MediaSession ───
+    private var mediaSession: MediaSessionCompat? = null
+    private var audioManager: AudioManager? = null
+    private var audioFocusRequest: AudioFocusRequest? = null
+    private var hasAudioFocus = false
+
+    private val audioFocusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+        when (focusChange) {
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                // 获得焦点，恢复播报
+                Log.d(TAG, "AudioFocus: GAIN")
+                hasAudioFocus = true
+            }
+            AudioManager.AUDIOFOCUS_LOSS -> {
+                // 永久失去焦点，停止
+                Log.d(TAG, "AudioFocus: LOSS")
+                hasAudioFocus = false
+                tts?.stop()
+                stopSelf()
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                // 暂时失去焦点（比如来电），暂停
+                Log.d(TAG, "AudioFocus: LOSS_TRANSIENT")
+                hasAudioFocus = false
+                tts?.stop()
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                // 可以降低音量继续
+                Log.d(TAG, "AudioFocus: LOSS_TRANSIENT_CAN_DUCK")
+                tts?.setSpeechRate(0.6f)
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "TtsBroadcastService onCreate")
+
+        // ─── 1. 创建通知渠道 ───
         createNotificationChannel()
+
+        // ─── 2. 注册 MediaSession（系统媒体控制器识别为音频 App）───
+        initMediaSession()
+
+        // ─── 3. 请求音频焦点 ───
+        requestAudioFocus()
+
+        // ─── 4. 初始化 TTS ───
         initTTS()
     }
 
@@ -80,10 +130,7 @@ class TtsBroadcastService : Service() {
             }
             ACTION_SPEAK_REPORT -> {
                 reportInterval = intent.getIntExtra("report_interval", defaultIntervalSec)
-                // 立即显示前台通知
-                startForeground(NOTIFICATION_ID, buildNotification("正在播报行情..."))
-
-                // 读取需要播报的内容
+                startForeground(NOTIFICATION_ID, buildNotification("正在播报行情...", isPlaying = true))
                 loadAndSpeakStocks()
             }
         }
@@ -92,25 +139,112 @@ class TtsBroadcastService : Service() {
 
     override fun onDestroy() {
         Log.d(TAG, "TtsBroadcastService onDestroy")
+        releaseAudioFocus()
+        releaseMediaSession()
         releaseWakeLock()
         tts?.stop()
         tts?.shutdown()
         tts = null
         ttsReady = false
-        // 取消下次 Alarm（如果有）
         TtsAlarmReceiver.cancelAlarm(this)
         super.onDestroy()
     }
 
     // ═══════════════════════════════════════════
-    // TTS 初始化（原生 Android TextToSpeech）
+    // MediaSession（音频类 App 必须）
+    // ═══════════════════════════════════════════
+    private fun initMediaSession() {
+        mediaSession = MediaSessionCompat(this, MEDIA_SESSION_TAG).apply {
+            setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS)
+
+            // 播放状态：播放中
+            val state = PlaybackStateCompat.Builder()
+                .setActions(
+                    PlaybackStateCompat.ACTION_PLAY
+                    or PlaybackStateCompat.ACTION_PAUSE
+                    or PlaybackStateCompat.ACTION_STOP
+                    or PlaybackStateCompat.ACTION_PLAY_PAUSE
+                )
+                .setState(PlaybackStateCompat.STATE_PLAYING, 0, 1.0f)
+                .build()
+            setPlaybackState(state)
+
+            // 元数据：播报中
+            val metadata = android.support.v4.media.MediaMetadataCompat.Builder()
+                .putString(android.support.v4.media.MediaMetadataCompat.METADATA_KEY_TITLE, "听股通播报中")
+                .putString(android.support.v4.media.MediaMetadataCompat.METADATA_KEY_ARTIST, "行情播报")
+                .build()
+            setMetadata(metadata)
+
+            setCallback(object : MediaSessionCompat.Callback() {
+                override fun onStop() {
+                    Log.d(TAG, "MediaSession: onStop")
+                    tts?.stop()
+                    stopSelf()
+                }
+
+                override fun onPause() {
+                    Log.d(TAG, "MediaSession: onPause")
+                    tts?.stop()
+                }
+
+                override fun onPlay() {
+                    Log.d(TAG, "MediaSession: onPlay (ignored - TTS cannot be resumed)")
+                }
+            })
+
+            active = true
+            Log.d(TAG, "MediaSession activated")
+        }
+    }
+
+    private fun releaseMediaSession() {
+        mediaSession?.apply {
+            setPlaybackState(PlaybackStateCompat.STATE_STOPPED)
+            release()
+        }
+        mediaSession = null
+    }
+
+    // ═══════════════════════════════════════════
+    // 音频焦点（防止与其他 App 冲突）
+    // ═══════════════════════════════════════════
+    private fun requestAudioFocus() {
+        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ASSISTANT)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .build()
+
+        audioFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(audioAttributes)
+            .setAcceptsDelayedFocusGain(true)
+            .setOnAudioFocusChangeListener(audioFocusChangeListener)
+            .build()
+
+        val result = audioManager?.requestAudioFocus(audioFocusRequest!!)
+        hasAudioFocus = (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED)
+        Log.d(TAG, "AudioFocus request result: $result, hasFocus=$hasAudioFocus")
+    }
+
+    private fun releaseAudioFocus() {
+        if (audioFocusRequest != null && hasAudioFocus) {
+            audioManager?.abandonAudioFocusRequest(audioFocusRequest!!)
+            hasAudioFocus = false
+            Log.d(TAG, "AudioFocus released")
+        }
+    }
+
+    // ═══════════════════════════════════════════
+    // TTS 初始化
     // ═══════════════════════════════════════════
     private fun initTTS() {
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 val result = tts?.setLanguage(Locale.CHINESE)
                 if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    Log.w(TAG, "Chinese TTS not supported, falling back to default")
+                    Log.w(TAG, "Chinese TTS not supported, falling back")
                     tts?.setLanguage(Locale.getDefault())
                 } else {
                     ttsReady = true
@@ -126,8 +260,6 @@ class TtsBroadcastService : Service() {
     // 加载股票数据并开始播报
     // ═══════════════════════════════════════════
     private fun loadAndSpeakStocks() {
-        // 从 SharedPreferences 读取自选股列表
-        // 由于熄屏后 Flutter 可能已被杀死，直接读取 Flutter 的存储
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val stockNamesRaw = prefs.getString(KEY_STOCK_NAMES, null)
 
@@ -144,7 +276,6 @@ class TtsBroadcastService : Service() {
             }
         }
 
-        // 如果 SharedPreferences 没有，尝试从 watchlist_v2 读取
         if (stocks.isEmpty()) {
             val watchlistRaw = prefs.getString(KEY_WATCHLIST, null)
             if (watchlistRaw != null) {
@@ -161,20 +292,16 @@ class TtsBroadcastService : Service() {
         }
 
         if (stocks.isEmpty()) {
-            Log.w(TAG, "No stocks to report, stopping service")
-            // 播报空状态仍然触发下一次 Alarm（保持定时器活跃）
+            Log.w(TAG, "No stocks to report, stopping")
             scheduleNextAlarm()
             stopSelf()
             return
         }
 
-        // 获取实时价格（通过腾讯 API，不依赖 Flutter）
         fetchPricesAndSpeak(stocks)
     }
 
     private fun fetchPricesAndSpeak(stocks: List<Pair<String, String>>) {
-        // 使用同步 HTTP 获取价格（Alarm 触发时可以接受少量阻塞）
-        // 但考虑到 Alarm 可能在任何时候触发，我们用异步 + WakeLock 的方式
         Thread {
             try {
                 val codes = stocks.joinToString(",") { it.first }
@@ -185,8 +312,7 @@ class TtsBroadcastService : Service() {
                 conn.setRequestProperty("Referer", "https://gu.qq.com")
                 conn.setRequestProperty("Accept", "*/*")
 
-                val responseCode = conn.responseCode
-                if (responseCode == 200) {
+                if (conn.responseCode == 200) {
                     val reader = java.io.BufferedReader(
                         java.io.InputStreamReader(conn.inputStream, "gbk")
                     )
@@ -196,24 +322,22 @@ class TtsBroadcastService : Service() {
 
                     val texts = parseAndBuildReport(body, stocks)
                     if (texts.isNotEmpty()) {
-                        // 获得 WakeLock 开始播报
                         acquireWakeLock()
                         speakQueue = texts.toMutableList()
                         currentIndex = 0
                         speakNext()
                     } else {
-                        Log.w(TAG, "No price data parsed, scheduling next alarm anyway")
+                        Log.w(TAG, "No price data parsed")
                         scheduleNextAlarm()
                         stopSelf()
                     }
                 } else {
-                    Log.e(TAG, "Failed to fetch prices: HTTP $responseCode")
+                    Log.e(TAG, "HTTP ${conn.responseCode}")
                     scheduleNextAlarm()
                     stopSelf()
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "fetchPricesAndSpeak error: $e")
-                // 网络失败仍然设置下一轮 Alarm
                 scheduleNextAlarm()
                 stopSelf()
             }
@@ -233,7 +357,6 @@ class TtsBroadcastService : Service() {
             val name = stockInfo.second
 
             val price = fields.getOrNull(3)?.toDoubleOrNull() ?: continue
-            val change = fields.getOrNull(31)?.toDoubleOrNull() ?: 0.0
             val changePct = fields.getOrNull(32)?.toDoubleOrNull() ?: 0.0
 
             val dir = if (changePct >= 0) "涨" else "跌"
@@ -245,10 +368,11 @@ class TtsBroadcastService : Service() {
 
     private fun speakNext() {
         if (currentIndex >= speakQueue.size) {
-            // 所有播报完成
-            Log.d(TAG, "All stocks reported. Scheduling next alarm in ${reportInterval}s")
+            Log.d(TAG, "All stocks reported, scheduling next alarm in ${reportInterval}s")
             releaseWakeLock()
             scheduleNextAlarm()
+            // 播完更新通知为非播放状态
+            updateNotification("播报完成", isPlaying = false)
             stopSelf()
             return
         }
@@ -257,29 +381,27 @@ class TtsBroadcastService : Service() {
         Log.d(TAG, "Speaking [$currentIndex/${speakQueue.size}]: $text")
 
         if (!ttsReady || tts == null) {
-            Log.e(TAG, "TTS not ready, cannot speak")
+            Log.e(TAG, "TTS not ready")
             releaseWakeLock()
             scheduleNextAlarm()
             stopSelf()
             return
         }
 
-        // 更新通知
-        updateNotification("正在播报 ${currentIndex + 1}/${speakQueue.size}")
+        // 更新 MediaSession 状态
+        updateMediaSessionState()
 
         val params = android.os.Bundle()
         tts?.setSpeechRate(0.85f)
         tts?.speak(text, TextToSpeech.QUEUE_ADD, params, "tts_utterance_$currentIndex")
 
-        // 监听播报完成，播下一句
         tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {
-                Log.d(TAG, "TTS started: $utteranceId")
+                updateNotification("${currentIndex + 1}/${speakQueue.size}: $text", isPlaying = true)
             }
 
             override fun onDone(utteranceId: String?) {
                 currentIndex++
-                // 句间停顿 800ms
                 android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                     speakNext()
                 }, 800)
@@ -293,17 +415,27 @@ class TtsBroadcastService : Service() {
         })
     }
 
+    private fun updateMediaSessionState() {
+        mediaSession?.setPlaybackState(
+            PlaybackStateCompat.Builder()
+                .setActions(
+                    PlaybackStateCompat.ACTION_PLAY
+                    or PlaybackStateCompat.ACTION_PAUSE
+                    or PlaybackStateCompat.ACTION_STOP
+                )
+                .setState(PlaybackStateCompat.STATE_PLAYING, currentIndex.toLong(), 1.0f)
+                .build()
+        )
+    }
+
     // ═══════════════════════════════════════════
-    // WakeLock 管理
+    // WakeLock
     // ═══════════════════════════════════════════
     private fun acquireWakeLock() {
         if (wakeLock != null) return
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = powerManager.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK,
-            WAKE_LOCK_TAG
-        )
-        wakeLock?.acquire(120000) // 最多持有 2 分钟（超时保护）
+        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG)
+        wakeLock?.acquire(120000)
         Log.d(TAG, "WakeLock acquired")
     }
 
@@ -316,50 +448,67 @@ class TtsBroadcastService : Service() {
     }
 
     // ═══════════════════════════════════════════
-    // 通知频道
+    // 通知渠道（音频类 App 规范）
     // ═══════════════════════════════════════════
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "听股通播报服务",
+                CHANNEL_NAME,
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "后台运行时播报股票行情"
+                description = "后台播报股票行情"
                 setShowBadge(false)
+                // 音频类 App：通知静音，不发出声音
                 setSound(null, null)
+                // 允许在锁屏和媒体控制器上显示
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
         }
     }
 
-    private fun buildNotification(text: String): Notification {
+    private fun buildNotification(text: String, isPlaying: Boolean): Notification {
         val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
+            this, 0,
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+
+        // 停止按钮
+        val stopIntent = Intent(this, TtsBroadcastService::class.java).apply {
+            action = ACTION_STOP
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            this, 1,
+            stopIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("听股通")
+            .setContentTitle(if (isPlaying) "听股通正在播报" else "听股通播报服务")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_media_play)
-            .setOngoing(true)
+            .setOngoing(isPlaying)
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setStyle(
+                MediaStyle()
+                    .setMediaSession(mediaSession?.sessionInfo)
+                    .setShowActionsInCompactView(0)
+            )
+            .addAction(android.R.drawable.ic_media_pause, "停止", stopPendingIntent)
             .build()
     }
 
-    private fun updateNotification(text: String) {
+    private fun updateNotification(text: String, isPlaying: Boolean) {
         val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, buildNotification(text))
+        manager.notify(NOTIFICATION_ID, buildNotification(text, isPlaying))
     }
 
-    // ═══════════════════════════════════════════
-    // 定时器管理
-    // ═══════════════════════════════════════════
     private fun scheduleNextAlarm() {
         TtsAlarmReceiver.scheduleNextReport(this, reportInterval)
     }
