@@ -40,24 +40,25 @@ class MainActivity : FlutterActivity() {
                 // 定时器管理（熄屏后由 AlarmManager 唤醒）
                 // ─────────────────────────────────────────
                 "startBackgroundReporting" -> {
-                    // 用户开启播报，同时启动 AlarmManager 定时器
-                    // 前后台统一入口：前台走 Flutter 逻辑，后台走 Android 原生
-                    val interval = call.argument<Int>("intervalSec") ?: 60
-                    val stockNamesJson = call.argument<String>("stockNamesJson") ?: "{}"
-                    val stockCodesJson = call.argument<String>("stockCodesJson") ?: "[]"
+                    try {
+                        val interval = call.argument<Int>("intervalSec") ?: 60
+                        val stockNamesJson = call.argument<String>("stockNamesJson") ?: "{}"
+                        val stockCodesJson = call.argument<String>("stockCodesJson") ?: "[]"
 
-                    // 发送调试通知（不依赖 Activity 状态）
-                    createDebugNotificationChannel()
-                    showDebugNotification("✅ startBackgroundReporting 调用成功！间隔=${interval}秒")
+                        android.util.Log.d("MainActivity", ">>> startBackgroundReporting called")
+                        createDebugNotificationChannel()
+                        showDebugNotification("✅ startBackgroundReporting 调用成功！间隔=${interval}秒")
 
-                    // 保存播报配置（TtsBroadcastService 熄屏后从这里读取）
-                    saveReportingConfig(interval, stockNamesJson, stockCodesJson)
+                        saveReportingConfig(interval, stockNamesJson, stockCodesJson)
+                        scheduleNextReport(interval)
 
-                    // 设置 AlarmManager 定时器（熄屏后唤醒）
-                    scheduleNextReport(interval)
-
-                    android.util.Log.d("MainActivity", ">>> startBackgroundReporting done")
-                    result.success(true)
+                        android.util.Log.d("MainActivity", ">>> startBackgroundReporting done")
+                        result.success(true)
+                    } catch (e: Exception) {
+                        android.util.Log.e("MainActivity", "!!! startBackgroundReporting EXCEPTION: ${e.message}")
+                        showDebugNotification("❌ startBackgroundReporting 异常：${e.message}")
+                        result.error("NATIVE_ERROR", e.message, null)
+                    }
                 }
                 "stopBackgroundReporting" -> {
                     cancelBackgroundReporting()
