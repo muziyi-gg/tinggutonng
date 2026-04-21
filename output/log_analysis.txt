@@ -1,0 +1,128 @@
+================================================================================
+3张日志截图文字提取 - 关键词: _activateBackgroundTimer, speaking, Alarm, lifecycle
+================================================================================
+
+【截图1: 1000033083.jpg】
+--------------------------------------------------------------------------------
+App apa) #8: resumed (Wl il)
+0 IRA: _speaking=true | TTS#BAH=true
+TAY 28 3HR: true
+
+Fikig Ei, SEEiRITIR15.6070,
+m (1b
+
+@ [poll] Tencent matched=2/2
+u [report] _reportAll: already reporting, skip
+u [report] _reportAll triggered: _speaking=true, _isReporting=true, stocks=2
+@ [poll] Tencent matched=2/2
+4) [TTS.START] handler START - state=TtsState.playing
+2) [TTS] speak() called: "PEI, 258.4270, 20.20%", current state=TtsState.idle, appLifecycle=AppLifecycleState.resumed
+u [report] _speakAndNotify: calling _tts.speak("PH FX, ik 58.4270, 10.20%")
+u [report] _reportAll: about to speak "PEF, #258.427c, KH 0.20%"
+~) [TTS.APP] App resumed - TTS state=idle
+4) [TTS.APP] AppLifecycleState changed to: AppLifecycleState.resumed, wasSpeaking=false
+u [report] _reportAll: already reporting, skip
+u [report] _reportAll triggered: _speaking=true, _isReporting=true, stocks=2
+QO {lifecycle] App resumed: TTS was interrupted, restarting
+Q [lifecycle] App RESUMED: wasPlaying=true, speaking=true, tts.isPlaying=false
+Q [lifecycle] _activateBackgroundTimer: AFTER native call success
+4) [TTS] startBackgroundReporting: interval=1s, stocks=2
+4) [TTS.APP] AppLifecycleState changed to: AppLifecycleState.inactive, wasSpeaking=false
+Q {lifecycle] _activateBackgroundTimer: BEFORE native call, interval=1s, stocks=2
+Q {lifecycle] App INACTIVE: wasPlaying=true, speaking=true, tts.isPlaying=false
+4) [TTS.APP] AppLifecycleState changed to: AppLifecycleState.hidden, wasSpeaking=false
+4) ITTS.DON ESS Doe COM pte non etate=TtsState plaving.
+
+================================================================================
+
+【截图2: 1000033084.jpg】
+--------------------------------------------------------------------------------
+App apa) #8: resumed (Wl il)
+0 IRA: _speaking=true | TTS#BAH=true
+TAY 28 3HR: true
+
+4) [TTS.APP] App resumed = 11S state=lale
+4) [TTS.APP] AppLifecycleState changed to: AppLifecycleState.resumed, wasSpeaking=false
+u [report] _reportAll: already reporting, skip
+u [report] _reportAll triggered: _speaking=true, _isReporting=true, stocks=2
+Q {lifecycle] App resumed: TTS was interrupted, restarting
+Q {lifecycle] App RESUMED: wasPlaying=true, speaking=true, tts.isPlaying=false
+i) {lifecycle] _activateBackgroundTimer: AFTER native call success
+4) [TTS] startBackgroundReporting: interval=1s, stocks=2
+4) [TTS.APP] AppLifecycleState changed to: AppLifecycleState.inactive, wasSpeaking=false
+0 {lifecycle] _activateBackgroundTimer: BEFORE native call, interval=1s, stocks=2
+Q {lifecycle] App INACTIVE: wasPlaying=true, speaking=true, tts.isPlaying=false
+2D) [TTS.APP] AppLifecycleState changed to: AppLifecycleState.hidden, wasSpeaking=false
+4) {TTS.DONE] handler COMPLETION - state=TtsState.playing, appLifecycle=AppLifecycleState.paused
+u [report] _speakAndNotify: _tts.speak completed normally
+a {poll] Poll error: ClientException with SocketException: Failed host lookup: 'qt.gtimg.cn' (OS Error: No address associated with hostname, errno = 7), uri=https://qt.gtimg.cn/q=sh600519,sh601318
+u [report] _reportAll: already reporting, skip
+Ce
+[report] _reportAll triggered: _speaking=true, _isReporting=true, stocks=2
+[poll] Poll error: ClientException with SocketException: Failed host lookup: 'qt.gtimg.cn' (OS Error: No address associated with hostname, errno = 7), uri=https://qt.gtimg.cn/q=sh600519,sh601318
+
+================================================================================
+
+【截图3: 1000033085.jpg】
+--------------------------------------------------------------------------------
+App apa) #8: resumed (Wl il)
+0 IRA: _speaking=true | TTS#BAH=true
+TAY 28 3HR: true
+
+_isReporting=true, stocks=2
+
+@ [poll] Poll error: ClientException with SocketException: Failed host lookup: 'qt.gtimg.cn' (OS Error: No address associated with hostname, errno = 7), uri=https://qt.gtimg.cn/q=sh600519,sh601318
+u [report] _reportAll: already reporting, skip
+[report] _reportAll triggered: _speaking=true, _isReporting=true, stocks=2
+@ {poll] Poll error: ClientException with SocketException: Failed host lookup: 'qt.gtimg.cn' (OS Error: No address associated with hostname, errno = 7), uri=https://qt.gtimg.cn/q=sh600519,sh601318
+u [report] _reportAll: already reporting, skip
+u [report] _reportAll triggered: _speaking=true, _isReporting=true, stocks=2
+@ {poll] Poll error: ClientException with SocketException: Failed host lookup: 'qt.gtimg.cn' (OS Error: No address associated with hostname, errno = 7), uri=https://qt.gtimg.cn/q=sh600519,sh601318
+¥ [report] _reportAll: already reporting, skip
+¥ [report] _reportAll triggered: _speaking=true, _isReporting=true, stocks=2
+@ {poll] Poll error: ClientException with SocketException: Failed host lookup: 'qt.gtimg.cn' (OS Error: No address associated with hostname, errno = 7), uri=https://qt.gtimg.cn/q=sh600519,sh601318
+¥ [report] _reportAll: already reporting, skip
+¥ [report] _reportAll triggered: _speaking=true, _isReporting=true, stocks=2
+@ {poll] Poll error: ClientException with SocketException: Failed host lookup: 'qt.gtimg.cn' (OS Error: No address associated with hostname, errno = 7), uri=https://qt.gtimg.cn/q=sh600519,sh601318
+¥ [report] _reportAll: already reporting, skip
+¥ [report] _reportAll triggered: _speaking=true, _isReporting=true, stocks=2
+& {poll] Poll error: ClientException with SocketException: Failed host lookup: 'qt.gtimg.cn' (OS Error: No address associated with hostname, errno = 7), uri=https://qt.gtimg.cn/q=sh600519,sh601318
+2D) [TTS.START] handler START - state=TtsState.playing
+
+================================================================================
+
+【关键词汇总】
+
+1. _activateBackgroundTimer:
+   - "Q [lifecycle] _activateBackgroundTimer: BEFORE native call, interval=1s, stocks=2"
+   - "Q [lifecycle] _activateBackgroundTimer: AFTER native call success"
+
+2. speaking:
+   - "_speaking=true"
+   - "wasSpeaking=false"
+   - "speaking=true"
+   - "_reportAll triggered: _speaking=true, _isReporting=true, stocks=2"
+
+3. Alarm/TtsAlarm/TtsBroadcast:
+   - 未发现相关日志
+
+4. lifecycle:
+   - "App RESUMED: wasPlaying=true, speaking=true, tts.isPlaying=false"
+   - "App INACTIVE: wasPlaying=true, speaking=true, tts.isPlaying=false"
+   - "AppLifecycleState changed to: AppLifecycleState.resumed/inactive/hidden"
+   - "_activateBackgroundTimer" (带lifecycle标签)
+
+5. INACTIVE/PAUSED/RESUMED:
+   - AppLifecycleState.resumed
+   - AppLifecycleState.inactive
+   - AppLifecycleState.hidden
+   - AppLifecycleState.paused
+
+6. 错误/异常:
+   - "Poll error: ClientException with SocketException: Failed host lookup: 'qt.gtimg.cn' (OS Error: No address associated with hostname, errno = 7)"
+   - 大量重复的网络错误
+
+7. Native TTS/flutterTts:
+   - TtsState.playing/idle
+   - startBackgroundReporting
+

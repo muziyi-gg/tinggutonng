@@ -31,6 +31,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: tingutong-release-apk
+          name: tingutong-release-apk-${{ github.run_id }}
           path: build/app/outputs/flutter-apk/
           retention-days: 7
