@@ -9,10 +9,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <!-- 保持 CPU 活跃，防止熄屏后 CPU 休眠导致 TTS 中断 -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Android 12+ 精确定时闹钟权限（setExactAndAllowWhileIdle 需要） -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
-    <!-- Android 11+ TTS 引擎发现必须声明 -->
     <queries>
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
@@ -43,12 +43,32 @@
             </intent-filter>
         </activity>
 
-        <!-- TTS 前台服务 -->
+        <!-- TTS 前台服务（熄屏后播报） -->
         <service
-            android:name=".TtsForegroundService"
+            android:name=".TtsBroadcastService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+
+        <!-- 定时器接收器（AlarmManager 触发 → 启动 TtsBroadcastService） -->
+        <receiver
+            android:name=".TtsAlarmReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.tingutong.app.TTS_ALARM" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 重启后恢复熄屏播报定时器 -->
+        <receiver
+            android:name=".TtsBootReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
         <!-- 启动接收器 -->
         <receiver
@@ -62,8 +82,6 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
-
-
 
         <meta-data
             android:name="flutterEmbedding"

@@ -31,13 +31,14 @@ TtsLogCallback? _externalLogCallback;
 class TtsService with WidgetsBindingObserver {
   final FlutterTts _tts = FlutterTts();
   static const _serviceChannel = MethodChannel('com.tingutong.app/tts_service');
-  bool _isServiceRunning = false;
   TtsState _state = TtsState.idle;
   Timer? _safetyTimer;
   String _currentLanguage = 'zh-CN';
   Completer<void>? _speakCompleter;
   String? _lastSpeakingText;
-  Timer? _stopServiceTimer;
+
+  /// 后台播报是否已激活（AlarmManager 已设置）
+  bool _backgroundReportingActive = false;
 
   /// 调试事件日志（最多保留100条）
   final List<TtsLifecycleEvent> _debugLog = [];
@@ -288,24 +289,92 @@ class TtsService with WidgetsBindingObserver {
 
   Future<void> _ensureAudioSession() async {
     if (!_isAndroid) return;
-    try {
-      // 启动前台服务保持 App 后台活跃，防止 TTS 被系统杀死
-      await _serviceChannel.invokeMethod('startForegroundService');
-      _isServiceRunning = true;
-      _log('debug', 'ForegroundService started');
-      // 重置停止计时器（如果有的话）
-      _stopServiceTimer?.cancel();
-      _stopServiceTimer = Timer(const Duration(seconds: 30), () async {
-        // 30s 无新播报则停止前台服务
-        try {
-          await _serviceChannel.invokeMethod('stopForegroundService');
-          _isServiceRunning = false;
-          _log('debug', 'ForegroundService stopped (idle timeout)');
-        } catch (_) {}
-      });
-    } catch (e) {
-      _log('debug', '_ensureAudioSession failed: $e');
+    // 现在只做语言设置，不要再启动前台服务
+    // 熄屏播报完全由 AlarmManager → TtsBroadcastService 处理
+  }
+
+  /// 启动后台播报（AlarmManager 定时 + 股票配置持久化）
+  /// 前后台统一：前台由 stock_provider 的 Timer 驱动，后台由 AlarmManager 驱动
+  Future<void> startBackgroundReporting({
+    required int intervalSec,
+    required List<MapEntry<String, String>> stocks,
+  }) async {
+    if (!_isAndroid) return;
+    final namesJson = <String, String>{};
+    final codesJson = <String>[];
+    for (final s in stocks) {
+      namesJson[s.key] = s.value;
+      codesJson.add(s.key);
     }
+    try {
+      await _serviceChannel.invokeMethod('startBackgroundReporting', {
+        'intervalSec': intervalSec,
+        'stockNamesJson': _encodeJsonMap(namesJson),
+        'stockCodesJson': _encodeJsonList(codesJson),
+      });
+      _backgroundReportingActive = true;
+      _log('debug', 'startBackgroundReporting: interval=${intervalSec}s, stocks=${stocks.length}');
+    } catch (e) {
+      _log('debug', 'startBackgroundReporting failed: $e');
+    }
+  }
+
+  /// 停止后台播报（取消 AlarmManager）
+  Future<void> stopBackgroundReporting() async {
+    if (!_isAndroid) return;
+    try {
+      await _serviceChannel.invokeMethod('stopBackgroundReporting');
+      _backgroundReportingActive = false;
+      _log('debug', 'stopBackgroundReporting: done');
+    } catch (e) {
+      _log('debug', 'stopBackgroundReporting failed: $e');
+    }
+  }
+
+  /// 更新后台播报配置（间隔/股票列表变化时）
+  Future<void> updateBackgroundReporting({
+    required int intervalSec,
+    required List<MapEntry<String, String>> stocks,
+  }) async {
+    if (!_isAndroid) return;
+    final namesJson = <String, String>{};
+    final codesJson = <String>[];
+    for (final s in stocks) {
+      namesJson[s.key] = s.value;
+      codesJson.add(s.key);
+    }
+    try {
+      await _serviceChannel.invokeMethod('updateBackgroundReporting', {
+        'intervalSec': intervalSec,
+        'stockNamesJson': _encodeJsonMap(namesJson),
+        'stockCodesJson': _encodeJsonList(codesJson),
+      });
+      _log('debug', 'updateBackgroundReporting: done');
+    } catch (e) {
+      _log('debug', 'updateBackgroundReporting failed: $e');
+    }
+  }
+
+  String _encodeJsonMap(Map<String, String> map) {
+    final sb = StringBuffer('{');
+    var first = true;
+    for (final e in map.entries) {
+      if (!first) sb.write(',');
+      first = false;
+      sb.write('"${e.key}":"${e.value}"');
+    }
+    sb.write('}');
+    return sb.toString();
+  }
+
+  String _encodeJsonList(List<String> list) {
+    final sb = StringBuffer('[');
+    for (var i = 0; i < list.length; i++) {
+      if (i > 0) sb.write(',');
+      sb.write('"${list[i]}"');
+    }
+    sb.write(']');
+    return sb.toString();
   }
 
   /// 播报文本。抛出 TtsException 表示失败（供 UI 层展示）。
@@ -360,10 +429,6 @@ class TtsService with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _cancelSafetyTimer();
-    _stopServiceTimer?.cancel();
     _tts.stop();
-    if (_isAndroid && _isServiceRunning) {
-      _serviceChannel.invokeMethod('stopForegroundService').catchError((_) {});
-    }
   }
 }

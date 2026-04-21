@@ -55,6 +55,9 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// App 切后台时 TTS 是否在播（用于切回前台判断是否恢复）
   bool _wasPlayingWhenBackgrounded = false;
 
+  /// AlarmManager 后台定时器是否已激活（熄屏后由系统闹钟唤醒）
+  bool _backgroundTimerActive = false;
+
   /// 调试日志（保留最近200条）
   final List<DebugLogEntry> _debugLog = [];
   static const int _maxLog = 200;
@@ -69,6 +72,7 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
   List<DebugLogEntry> get debugLog => List.unmodifiable(_debugLog);
   AppLifecycleState get appLifecycle => _appLifecycle;
   bool get ttsIsPlaying => _tts.isPlaying;
+  bool get backgroundTimerActive => _backgroundTimerActive;
 
   void _log(String tag, String msg) {
     _debugLog.add(DebugLogEntry(tag, msg));
@@ -165,6 +169,7 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
       _stocks[code] = Stock(code: code, name: name, tradeDate: DateTime.now());
       _ensureWatchRunning();
       _saveStocks();
+      if (_speaking) _updateBackgroundTimer(); // 同步更新熄屏播报列表
       notifyListeners();
     }
   }
@@ -177,11 +182,13 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
     } else {
       _ensureWatchRunning();
     }
+    if (_speaking) _updateBackgroundTimer(); // 同步更新熄屏播报列表
     notifyListeners();
   }
 
   /// 开启循环播报（用户按播放按钮）
-  /// 定时器按 _reportIntervalSec 间隔触发，播完一轮后等下一轮
+  /// 前台：Flutter Timer 驱动
+  /// 熄屏后：Android AlarmManager → TtsBroadcastService（原生 TTS）驱动
   void startReport() {
     if (_speaking) {
       _log('report', 'startReport: already speaking, ignore');
@@ -190,6 +197,11 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
     _speaking = true;
     _reportTimer?.cancel();
     _log('report', 'startReport: _speaking=true, starting timer every ${_reportIntervalSec}s');
+
+    // 激活熄屏后定时器（AlarmManager）
+    // 存两份：一份给 Flutter（前台），一份给 Android 原生（后台）
+    _activateBackgroundTimer();
+
     // 立即播一次，然后按间隔循环
     _reportAll(); // 异步，不阻塞
     _reportTimer = Timer.periodic(
@@ -209,6 +221,8 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
         Duration(seconds: seconds),
         (_) => _reportAll(),
       );
+      // 同时更新熄屏定时器间隔
+      _updateBackgroundTimer();
     }
     notifyListeners();
   }
@@ -362,7 +376,65 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
     _reportTimer?.cancel();
     _reportTimer = null;
     await _tts.stop();
+    // 取消熄屏定时器
+    await _deactivateBackgroundTimer();
     notifyListeners();
+  }
+
+  // ═══════════════════════════════════════════
+  // 熄屏后定时播报（Android 原生 AlarmManager）
+  // 原理：Flutter Timer 在熄屏时被暂停，但 AlarmManager 由系统唤醒
+  // ═══════════════════════════════════════════
+
+  /// 激活熄屏定时器（写入股票配置到 SharedPreferences，Android 原生层读取）
+  Future<void> _activateBackgroundTimer() async {
+    try {
+      // 构建股票名称映射
+      final namesJson = <String, String>{};
+      final codesJson = <String>[];
+      for (final s in _stocks.values) {
+        namesJson[s.code] = s.name;
+        codesJson.add(s.code);
+      }
+      await _tts.startBackgroundReporting(
+        intervalSec: _reportIntervalSec,
+        stocks: namesJson.entries.map((e) => MapEntry(e.key, e.value)).toList(),
+      );
+      _backgroundTimerActive = true;
+      _log('lifecycle', '_activateBackgroundTimer: interval=${_reportIntervalSec}s, stocks=${_stocks.length}');
+    } catch (e) {
+      _log('lifecycle', '_activateBackgroundTimer failed: $e');
+    }
+  }
+
+  /// 更新熄屏定时器（间隔变化或股票列表变化时调用）
+  Future<void> _updateBackgroundTimer() async {
+    try {
+      final namesJson = <String, String>{};
+      final codesJson = <String>[];
+      for (final s in _stocks.values) {
+        namesJson[s.code] = s.name;
+        codesJson.add(s.code);
+      }
+      await _tts.updateBackgroundReporting(
+        intervalSec: _reportIntervalSec,
+        stocks: namesJson.entries.map((e) => MapEntry(e.key, e.value)).toList(),
+      );
+      _log('lifecycle', '_updateBackgroundTimer: done');
+    } catch (e) {
+      _log('lifecycle', '_updateBackgroundTimer failed: $e');
+    }
+  }
+
+  /// 取消熄屏定时器
+  Future<void> _deactivateBackgroundTimer() async {
+    try {
+      await _tts.stopBackgroundReporting();
+      _backgroundTimerActive = false;
+      _log('lifecycle', '_deactivateBackgroundTimer: done');
+    } catch (e) {
+      _log('lifecycle', '_deactivateBackgroundTimer failed: $e');
+    }
   }
 
   Future<void> _speakAndNotify(String text, AlertType type) async {
@@ -450,6 +522,8 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
     _reportTimer?.cancel();
+    // 关闭熄屏定时器
+    _deactivateBackgroundTimer();
     _tts.dispose();
     super.dispose();
   }
