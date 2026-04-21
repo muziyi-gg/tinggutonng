@@ -19,6 +19,8 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
 
     private val CHANNEL = "com.tingutong.app/tts_service"
+    private val DEBUG_CHANNEL_ID = "debug_channel"
+    private val DEBUG_NOTIFICATION_ID = 999
 
     // SharedPreferences key for stock names (used by TtsBroadcastService)
     companion object {
@@ -44,11 +46,9 @@ class MainActivity : FlutterActivity() {
                     val stockNamesJson = call.argument<String>("stockNamesJson") ?: "{}"
                     val stockCodesJson = call.argument<String>("stockCodesJson") ?: "[]"
 
-                    // Toast 确认 native 被调用
-                    android.util.Log.d("MainActivity", ">>> startBackgroundReporting called")
-                    runOnUiThread {
-                        Toast.makeText(this, ">>> native: startBackgroundReporting called (interval=${interval}s)", Toast.LENGTH_LONG).show()
-                    }
+                    // 发送调试通知（不依赖 Activity 状态）
+                    createDebugNotificationChannel()
+                    showDebugNotification("✅ startBackgroundReporting 调用成功！间隔=${interval}秒")
 
                     // 保存播报配置（TtsBroadcastService 熄屏后从这里读取）
                     saveReportingConfig(interval, stockNamesJson, stockCodesJson)
@@ -164,9 +164,8 @@ class MainActivity : FlutterActivity() {
             if (!alarmManager.canScheduleExactAlarms()) {
                 android.util.Log.w("MainActivity", "SCHEDULE_EXACT_ALARM permission not granted")
                 android.util.Log.d("MainActivity", "scheduleNextReport: SKIPPED (no permission)")
-                runOnUiThread {
-                    Toast.makeText(this, ">>> 错误：没有精确闹钟权限！请在设置中开启", Toast.LENGTH_LONG).show()
-                }
+                createDebugNotificationChannel()
+                showDebugNotification("❌ 精确闹钟权限被拒！熄屏播报无法工作，请去系统设置开启")
                 return
             } else {
                 android.util.Log.d("MainActivity", "SCHEDULE_EXACT_ALARM permission OK")
@@ -184,9 +183,7 @@ class MainActivity : FlutterActivity() {
         )
         android.util.Log.d("MainActivity", "scheduleNextReport: setExactAndAllowWhileIdle called OK")
 
-        runOnUiThread {
-            Toast.makeText(this, ">>> Alarm 设置成功，将于 ${triggerDate} 触发", Toast.LENGTH_SHORT).show()
-        }
+        showDebugNotification("⏰ Alarm 已设置！熄屏后将于 $triggerDate 触发第1次播报")
 
         android.util.Log.d("MainActivity", "scheduleNextReport: done, scheduling next at $triggerDate")
     }
@@ -209,5 +206,42 @@ class MainActivity : FlutterActivity() {
         TtsBroadcastService.stopService(this)
         clearReportingConfig()
         android.util.Log.d("MainActivity", "Background reporting cancelled")
+    }
+
+    // ═══════════════════════════════════════════
+    // 调试用通知（用于无 adb 日志时的诊断）
+    // ═══════════════════════════════════════════
+
+    private fun createDebugNotificationChannel() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                DEBUG_CHANNEL_ID,
+                "调试通知",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "熄屏播报调试用通知"
+                enableLights(true)
+                enableVibration(true)
+            }
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.createNotificationChannel(channel)
+        }
+    }
+
+    private fun showDebugNotification(message: String) {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        // 取消旧通知（每次更新）
+        nm.cancel(DEBUG_NOTIFICATION_ID)
+        // 发送新通知
+        val notification = android.app.Notification.Builder(this, DEBUG_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("【听股通调试】")
+            .setContentText(message)
+            .setPriority(android.app.Notification.PRIORITY_HIGH)
+            .setAutoCancel(false)
+            .setOngoing(true)
+            .build()
+        nm.notify(DEBUG_NOTIFICATION_ID, notification)
+        android.util.Log.d("MainActivity", ">>> DEBUG NOTIF: $message")
     }
 }

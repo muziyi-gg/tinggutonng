@@ -48,6 +48,8 @@ class TtsBroadcastService : Service() {
 
         private const val WAKE_LOCK_TAG = "Tingutong:TTSWakeLock"
         private const val MEDIA_SESSION_TAG = "TingutongTTS"
+        private const val DEBUG_CHANNEL_ID = "service_debug_channel"
+        private const val DEBUG_NOTIFICATION_ID = 777
 
         var defaultIntervalSec = 60
 
@@ -104,7 +106,7 @@ class TtsBroadcastService : Service() {
         super.onCreate()
         android.util.Log.d(TAG, ">>> TtsBroadcastService onCreate")
 
-        android.widget.Toast.makeText(this, ">>> TtsBroadcastService 已启动，正在播报...", android.widget.Toast.LENGTH_SHORT).show()
+        showServiceStartedNotification()
 
         // ─── 1. 创建通知渠道 ───
         createNotificationChannel()
@@ -514,5 +516,36 @@ class TtsBroadcastService : Service() {
 
     private fun scheduleNextAlarm() {
         TtsAlarmReceiver.scheduleNextReport(this, reportInterval)
+    }
+
+    // ═══════════════════════════════════════════
+    // 调试用通知（无 adb 日志时的诊断）
+    // ═══════════════════════════════════════════
+
+    private fun showServiceStartedNotification() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                DEBUG_CHANNEL_ID,
+                "服务调试",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "服务启动调试通知"
+                enableVibration(true)
+            }
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.createNotificationChannel(channel)
+        }
+
+        val nm = getSystemService(NotificationManager::class.java)
+        val notification = android.app.Notification.Builder(this, DEBUG_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("🎧 【听股通】TtsBroadcastService 已启动！")
+            .setContentText("熄屏播报服务正在运行，正在合成语音...")
+            .setPriority(android.app.Notification.PRIORITY_MAX)
+            .setAutoCancel(false)
+            .setOngoing(true)
+            .build()
+        nm.notify(DEBUG_NOTIFICATION_ID, notification)
+        android.util.Log.d(TAG, ">>> DEBUG NOTIF: TtsBroadcastService started!")
     }
 }

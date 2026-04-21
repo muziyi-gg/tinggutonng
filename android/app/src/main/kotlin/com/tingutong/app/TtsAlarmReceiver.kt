@@ -1,6 +1,8 @@
 package com.tingutong.app
 
 import android.app.AlarmManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -26,6 +28,8 @@ class TtsAlarmReceiver : BroadcastReceiver() {
         const val EXTRA_REPORT_INTERVAL = "report_interval"
 
         const val REQUEST_CODE = 10001
+        private const val DEBUG_CHANNEL_ID = "alarm_debug_channel"
+        private const val DEBUG_NOTIFICATION_ID = 888
 
         /**
          * 设置下一轮播报的 Alarm（熄屏后通过系统闹钟唤醒）
@@ -90,7 +94,8 @@ class TtsAlarmReceiver : BroadcastReceiver() {
 
         android.util.Log.d(TAG, ">>> TtsAlarmReceiver: starting TtsBroadcastService")
 
-        android.widget.Toast.makeText(context, ">>> Alarm 触发！正在启动播报服务...", android.widget.Toast.LENGTH_LONG).show()
+        // 发送调试通知确认 Alarm 触发
+        showAlarmTriggeredNotification(context)
 
         // 启动前台服务执行 TTS 播报
         // 注意：这里 Intent 只带 action，播报内容从 SharedPreferences 读取
@@ -108,5 +113,36 @@ class TtsAlarmReceiver : BroadcastReceiver() {
 
         // 设置下一次 Alarm（播完后安排下一轮）
         // TtsBroadcastService 在播完后会自己调用 scheduleNextReport
+    }
+
+    // ═══════════════════════════════════════════
+    // 调试用通知（无 adb 日志时的诊断）
+    // ═══════════════════════════════════════════
+
+    private fun showAlarmTriggeredNotification(context: Context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                DEBUG_CHANNEL_ID,
+                "Alarm调试",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Alarm触发调试通知"
+                enableVibration(true)
+            }
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.createNotificationChannel(channel)
+        }
+
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notification = android.app.Notification.Builder(context, DEBUG_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("🔔 【听股通】Alarm 触发！")
+            .setContentText("正在启动 TtsBroadcastService 播报...")
+            .setPriority(android.app.Notification.PRIORITY_MAX)
+            .setAutoCancel(false)
+            .setOngoing(true)
+            .build()
+        nm.notify(DEBUG_NOTIFICATION_ID, notification)
+        android.util.Log.d(TAG, ">>> DEBUG NOTIF: Alarm triggered!")
     }
 }
