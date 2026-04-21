@@ -104,6 +104,8 @@ class TtsBroadcastService : Service() {
         super.onCreate()
         android.util.Log.d(TAG, ">>> TtsBroadcastService onCreate")
 
+        android.widget.Toast.makeText(this, ">>> TtsBroadcastService 已启动，正在播报...", android.widget.Toast.LENGTH_SHORT).show()
+
         // ─── 1. 创建通知渠道 ───
         createNotificationChannel()
 

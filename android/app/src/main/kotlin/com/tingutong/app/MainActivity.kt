@@ -1,6 +1,8 @@
 package com.tingutong.app
 
 import android.app.AlarmManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -9,6 +11,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.net.Uri
+import android.widget.Toast
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -41,7 +44,11 @@ class MainActivity : FlutterActivity() {
                     val stockNamesJson = call.argument<String>("stockNamesJson") ?: "{}"
                     val stockCodesJson = call.argument<String>("stockCodesJson") ?: "[]"
 
-                    android.util.Log.d("MainActivity", ">>> startBackgroundReporting called: interval=$interval, namesLen=${stockNamesJson.length}, codesLen=${stockCodesJson.length}")
+                    // Toast 确认 native 被调用
+                    android.util.Log.d("MainActivity", ">>> startBackgroundReporting called")
+                    runOnUiThread {
+                        Toast.makeText(this, ">>> native: startBackgroundReporting called (interval=${interval}s)", Toast.LENGTH_LONG).show()
+                    }
 
                     // 保存播报配置（TtsBroadcastService 熄屏后从这里读取）
                     saveReportingConfig(interval, stockNamesJson, stockCodesJson)
@@ -157,6 +164,9 @@ class MainActivity : FlutterActivity() {
             if (!alarmManager.canScheduleExactAlarms()) {
                 android.util.Log.w("MainActivity", "SCHEDULE_EXACT_ALARM permission not granted")
                 android.util.Log.d("MainActivity", "scheduleNextReport: SKIPPED (no permission)")
+                runOnUiThread {
+                    Toast.makeText(this, ">>> 错误：没有精确闹钟权限！请在设置中开启", Toast.LENGTH_LONG).show()
+                }
                 return
             } else {
                 android.util.Log.d("MainActivity", "SCHEDULE_EXACT_ALARM permission OK")
@@ -173,6 +183,10 @@ class MainActivity : FlutterActivity() {
             pendingIntent
         )
         android.util.Log.d("MainActivity", "scheduleNextReport: setExactAndAllowWhileIdle called OK")
+
+        runOnUiThread {
+            Toast.makeText(this, ">>> Alarm 设置成功，将于 ${triggerDate} 触发", Toast.LENGTH_SHORT).show()
+        }
 
         android.util.Log.d("MainActivity", "scheduleNextReport: done, scheduling next at $triggerDate")
     }

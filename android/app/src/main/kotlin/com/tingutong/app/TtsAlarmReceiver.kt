@@ -90,6 +90,8 @@ class TtsAlarmReceiver : BroadcastReceiver() {
 
         android.util.Log.d(TAG, ">>> TtsAlarmReceiver: starting TtsBroadcastService")
 
+        android.widget.Toast.makeText(context, ">>> Alarm 触发！正在启动播报服务...", android.widget.Toast.LENGTH_LONG).show()
+
         // 启动前台服务执行 TTS 播报
         // 注意：这里 Intent 只带 action，播报内容从 SharedPreferences 读取
         // （因为 Alarm 触发时 App 可能已被系统杀死，Intent extra 不可靠）
