@@ -198,8 +198,7 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
     _reportTimer?.cancel();
     _log('report', 'startReport: _speaking=true, starting timer every ${_reportIntervalSec}s');
 
-    // 激活熄屏后定时器（AlarmManager）
-    // 存两份：一份给 Flutter（前台），一份给 Android 原生（后台）
+    // 立即激活 AlarmManager（与 _speaking 解耦，只要用户开启播报就设置）
     _activateBackgroundTimer();
 
     // 立即播一次，然后按间隔循环
@@ -387,6 +386,7 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
   // ═══════════════════════════════════════════
 
   /// 激活熄屏定时器（写入股票配置到 SharedPreferences，Android 原生层读取）
+  /// 与 _speaking 解耦：只要用户开启播报就激活 AlarmManager
   Future<void> _activateBackgroundTimer() async {
     try {
       // 构建股票名称映射
@@ -396,14 +396,15 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
         namesJson[s.code] = s.name;
         codesJson.add(s.code);
       }
+      _log('lifecycle', '_activateBackgroundTimer: BEFORE native call, interval=${_reportIntervalSec}s, stocks=${_stocks.length}');
       await _tts.startBackgroundReporting(
         intervalSec: _reportIntervalSec,
         stocks: namesJson.entries.map((e) => MapEntry(e.key, e.value)).toList(),
       );
       _backgroundTimerActive = true;
-      _log('lifecycle', '_activateBackgroundTimer: interval=${_reportIntervalSec}s, stocks=${_stocks.length}');
-    } catch (e) {
-      _log('lifecycle', '_activateBackgroundTimer failed: $e');
+      _log('lifecycle', '_activateBackgroundTimer: AFTER native call success');
+    } catch (e, st) {
+      _log('lifecycle', '_activateBackgroundTimer FAILED: $e\n$st');
     }
   }
 
@@ -482,33 +483,30 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
 
     if (state == AppLifecycleState.inactive) {
       // 记录切后台时是否在播
-      // 用 _tts.isPlaying（TTS 引擎状态）作为主要判断，
-      // 同时检查 _speaking（TTS START 事件是否已到达）
       _wasPlayingWhenBackgrounded = _tts.isPlaying || _speaking;
-      _log('lifecycle', 'App INACTIVE: wasPlaying=$_wasPlayingWhenBackgrounded, tts.isPlaying=${_tts.isPlaying}, _speaking=$_speaking');
+      _log('lifecycle', 'App INACTIVE: wasPlaying=$_wasPlayingWhenBackgrounded, speaking=$_speaking, tts.isPlaying=${_tts.isPlaying}');
+      // 确保 AlarmManager 已激活（熄屏后独立触发播报）
+      if (_speaking) _activateBackgroundTimer();
     } else if (state == AppLifecycleState.paused) {
-      _log('lifecycle', 'App PAUSED: wasPlaying=$_wasPlayingWhenBackgrounded, timerAlive=${_reportTimer != null}');
+      _log('lifecycle', 'App PAUSED: speaking=$_speaking, timer=${_reportTimer != null}');
+      // 熄屏瞬间再确保一次 AlarmManager
+      if (_speaking) _activateBackgroundTimer();
     } else if (state == AppLifecycleState.resumed) {
-      _log('lifecycle', 'App RESUMED: wasPlaying=$_wasPlayingWhenBackgrounded, tts.isPlaying=${_tts.isPlaying}, _speaking=$_speaking');
+      _log('lifecycle', 'App RESUMED: wasPlaying=$_wasPlayingWhenBackgrounded, speaking=$_speaking, tts.isPlaying=${_tts.isPlaying}');
 
-      // 自动恢复机制：如果之前在播但 TTS 被系统中断停止，立即重启播报周期
-      // 用 _tts.isPlaying 判断（TTS 引擎状态），用 _speaking 作为兜底
-      if (_wasPlayingWhenBackgrounded && (!_tts.isPlaying || _speaking)) {
-        _log('lifecycle', 'App resumed: TTS was interrupted, restarting report cycle immediately');
-        _reportTimer?.cancel();
-        _reportTimer = Timer.periodic(
-          Duration(seconds: _reportIntervalSec),
-          (_) => _reportAll(),
-        );
-        // 立即触发一次播报（Timer 没有 fire()，手动调用）
+      // 自动恢复：如果之前在播但 TTS 被中断，立即重启
+      if (_wasPlayingWhenBackgrounded && !_tts.isPlaying) {
+        _log('lifecycle', 'App resumed: TTS was interrupted, restarting');
+        if (_reportTimer != null) {
+          _reportTimer!.cancel();
+          _reportTimer = Timer.periodic(
+            Duration(seconds: _reportIntervalSec),
+            (_) => _reportAll(),
+          );
+        }
         _reportAll();
-        _log('lifecycle', 'App resumed: triggered immediate report');
-      } else if (_wasPlayingWhenBackgrounded && _tts.isPlaying) {
-        // TTS 还在播（极端情况），继续等待
-        _log('lifecycle', 'App resumed: TTS still playing, will continue');
       } else if (_reportTimer == null && _speaking) {
-        // 定时器丢失（极端情况），重启
-        _log('lifecycle', 'App resumed: _reportTimer is null! Restarting timer.');
+        _log('lifecycle', 'App resumed: timer missing! Restarting.');
         _reportTimer = Timer.periodic(
           Duration(seconds: _reportIntervalSec),
           (_) => _reportAll(),

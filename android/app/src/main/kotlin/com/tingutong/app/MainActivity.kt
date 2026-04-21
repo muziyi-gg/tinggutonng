@@ -41,12 +41,15 @@ class MainActivity : FlutterActivity() {
                     val stockNamesJson = call.argument<String>("stockNamesJson") ?: "{}"
                     val stockCodesJson = call.argument<String>("stockCodesJson") ?: "[]"
 
+                    android.util.Log.d("MainActivity", ">>> startBackgroundReporting called: interval=$interval, namesLen=${stockNamesJson.length}, codesLen=${stockCodesJson.length}")
+
                     // 保存播报配置（TtsBroadcastService 熄屏后从这里读取）
                     saveReportingConfig(interval, stockNamesJson, stockCodesJson)
 
                     // 设置 AlarmManager 定时器（熄屏后唤醒）
                     scheduleNextReport(interval)
 
+                    android.util.Log.d("MainActivity", ">>> startBackgroundReporting done")
                     result.success(true)
                 }
                 "stopBackgroundReporting" -> {
