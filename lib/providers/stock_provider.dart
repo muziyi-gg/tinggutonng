@@ -9,6 +9,7 @@ import '../models/stock.dart';
 import '../models/alert_type.dart';
 import '../services/tts_service.dart';
 import '../services/notification_service.dart';
+import '../services/realtime_quote_service.dart';
 
 /// 播报错误信息，用于 UI 层展示
 class ReportError {
@@ -31,9 +32,11 @@ class DebugLogEntry {
 class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
   final TtsService _tts = TtsService();
   final NotificationService _notif = NotificationService();
+  final RealtimeQuoteService _rtq = RealtimeQuoteService();
 
   Timer? _reportTimer;
   Timer? _pollTimer;
+  StreamSubscription? _rtqSub;
   Map<String, Stock> _stocks = {};
   List<AlertItem> _recentAlerts = [];
   bool _isPolling = false;
@@ -73,6 +76,7 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
   AppLifecycleState get appLifecycle => _appLifecycle;
   bool get ttsIsPlaying => _tts.isPlaying;
   bool get backgroundTimerActive => _backgroundTimerActive;
+  bool get realtimeConnected => _rtq.isConnected;
 
   void _log(String tag, String msg) {
     _debugLog.add(DebugLogEntry(tag, msg));
@@ -91,9 +95,12 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     // 将 TTS 内部日志合并到 SP.debugLog，方便调试页面查看完整日志链
     _tts.registerLogCallback((tag, msg) => _log(tag, msg));
+    // 注册实时行情日志
+    _rtq.onLog = (msg) => _log('RTQ', msg);
     await _tts.init();
     await _notif.init();
     // 从本地存储恢复自选股（必须等待完成，防止竞态）
+    // 同步等待第一次价格获取完成，确保内存中已有实时价格
     await _loadStocks();
     notifyListeners();
   }
@@ -112,10 +119,13 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
         _stocks[code] = Stock(code: code, name: name, tradeDate: DateTime.now());
       }
       if (_stocks.isNotEmpty) {
+        // 连接 WebSocket 实时行情，同时做一次 HTTP 预热（确保 UI 立即有数据）
+        final codes = _stocks.keys.toList();
         _ensureWatchRunning();
-        // 同步等待第一次价格获取完成，确保内存中已有实时价格
-        // 这样 App 重启后界面立即显示正确价格，而非等待1秒轮询
+        // HTTP 预热：立即获取一次价格填充内存，WebSocket 推送覆盖之
         await _pollPricesLive();
+        // 连接 WebSocket，实现 <1秒延迟
+        _connectRealtime(codes);
       }
     } catch (e) {
       _log('init', '_loadStocks error: $e');
@@ -132,13 +142,49 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  /// 连接东方财富 WebSocket 实时行情（<1秒延迟）
+  Future<void> _connectRealtime(List<String> codes) async {
+    if (codes.isEmpty) return;
+    
+    await _rtq.connect(codes);
+    
+    // 监听 WebSocket 数据推送，实时更新内存中的股票行情
+    _rtqSub?.cancel();
+    _rtqSub = _rtq.quoteStream.listen((quotes) {
+      bool changed = false;
+      for (final entry in quotes.entries) {
+        if (_stocks.containsKey(entry.key)) {
+          _stocks[entry.key] = Stock(
+            code: entry.key,
+            name: _stocks[entry.key]!.name,
+            price: entry.value.price,
+            prevClose: _stocks[entry.key]!.prevClose,
+            change: entry.value.change,
+            changePct: entry.value.changePct,
+            openPrice: _stocks[entry.key]!.openPrice,
+            lastUpdate: DateTime.now(),
+            tradeDate: _stocks[entry.key]!.tradeDate,
+          );
+          changed = true;
+        }
+      }
+      if (changed) notifyListeners();
+    });
+    
+    _log('lifecycle', '_connectRealtime: connected, ${codes.length} stocks subscribed');
+  }
+
   /// 开始监控：启动轮询（内部使用，无需外部调用）
+  /// WebSocket 已连接时，轮询降为 5 秒间隔（数据来自 WebSocket，轮询仅做备用）
+  /// WebSocket 未连接时，保持 1 秒轮询（降级保底）
   void _ensureWatchRunning() {
     if (_isPolling) {
       // 已经运行中，重启轮询以包含最新股票列表
       _pollTimer?.cancel();
-      _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) => _pollPricesLive());
-      _log('lifecycle', '_ensureWatchRunning: restarted polling (already running)');
+      // WebSocket 连通时降频轮询（省电），WebSocket 断开时恢复 1s
+      final interval = _rtq.isConnected ? 5 : 1;
+      _pollTimer = Timer.periodic(Duration(seconds: interval), (_) => _pollPricesLive());
+      _log('lifecycle', '_ensureWatchRunning: restarted polling interval=${interval}s (RTQ=${_rtq.isConnected})');
       return;
     }
 
@@ -146,13 +192,14 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
     if (codes.isEmpty) return;
 
     _isPolling = true;
-    // 每秒轮询价格（使用 _pollPricesLive 读取实时股票列表）
-    _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) => _pollPricesLive());
+    // WebSocket 连通时降频轮询，WebSocket 断开时保持 1s
+    final interval = _rtq.isConnected ? 5 : 1;
+    _pollTimer = Timer.periodic(Duration(seconds: interval), (_) => _pollPricesLive());
 
     // 立即获取一次价格
     _pollPricesLive();
 
-    _log('lifecycle', '_ensureWatchRunning: started polling, stocks=${codes.length}');
+    _log('lifecycle', '_ensureWatchRunning: started polling, stocks=${codes.length}, interval=${interval}s');
     notifyListeners();
   }
 
@@ -160,16 +207,30 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
     _pollTimer?.cancel();
     _isPolling = false;
     _stocks.clear();
-    _log('lifecycle', 'stopWatch: stopped polling and cleared stocks');
+    _rtqSub?.cancel();
+    _rtq.disconnect();
+    _log('lifecycle', 'stopWatch: stopped polling, cleared stocks, disconnected RTQ');
     notifyListeners();
   }
 
   void addStock(String code, String name) {
     if (!_stocks.containsKey(code)) {
       _stocks[code] = Stock(code: code, name: name, tradeDate: DateTime.now());
-      _ensureWatchRunning();
       _saveStocks();
       if (_speaking) _updateBackgroundTimer(); // 同步更新熄屏播报列表
+      
+      // 如果是添加第一只股票，初始化 WebSocket 连接
+      final isFirstStock = _stocks.length == 1;
+      
+      // 更新 WebSocket 订阅（新增股票）
+      if (_rtq.isConnected) {
+        _rtq.updateSubscriptions(_stocks.keys.toList());
+      } else if (isFirstStock) {
+        // 首次添加股票且尚未连接 WebSocket，建立连接
+        _connectRealtime(_stocks.keys.toList());
+      }
+      
+      _ensureWatchRunning();
       notifyListeners();
     }
   }
@@ -180,6 +241,10 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
       stopWatch();
       _saveStocks();
     } else {
+      // 更新 WebSocket 订阅（移除股票）
+      if (_rtq.isConnected) {
+        _rtq.updateSubscriptions(_stocks.keys.toList());
+      }
       _ensureWatchRunning();
     }
     if (_speaking) _updateBackgroundTimer(); // 同步更新熄屏播报列表
@@ -520,6 +585,8 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
     _reportTimer?.cancel();
+    _rtqSub?.cancel();
+    _rtq.dispose();
     // 关闭熄屏定时器
     _deactivateBackgroundTimer();
     _tts.dispose();

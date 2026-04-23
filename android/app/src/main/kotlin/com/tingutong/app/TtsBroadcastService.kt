@@ -307,6 +307,15 @@ class TtsBroadcastService : Service() {
     }
 
     private fun fetchPricesAndSpeak(stocks: List<Pair<String, String>>) {
+        // ─── 立即获取 WakeLock（熄屏保活的关键！）
+        // 必须在外层获取，不能等网络请求完成后再获取。
+        // 否则系统可能在 fetch 过程中进入 Doze 深度休眠，导致请求挂死。
+        try {
+            acquireWakeLock()
+        } catch (e: Throwable) {
+            android.util.Log.e(TAG, "acquireWakeLock failed: $e")
+        }
+
         Thread {
             try {
                 val codes = stocks.joinToString(",") { it.first }
@@ -327,7 +336,6 @@ class TtsBroadcastService : Service() {
 
                     val texts = parseAndBuildReport(body, stocks)
                     if (texts.isNotEmpty()) {
-                        acquireWakeLock()
                         speakQueue = texts.toMutableList()
                         currentIndex = 0
                         speakNext()
@@ -440,8 +448,11 @@ class TtsBroadcastService : Service() {
         if (wakeLock != null) return
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG)
-        wakeLock?.acquire(120000)
-        Log.d(TAG, "WakeLock acquired")
+        // 5分钟（300秒）：覆盖 TTS 冷启动 + 网络请求 + 最长播报的耗时
+        // 不使用带超时的 acquire(timeout)，改用无超时的 acquire()，
+        // 因为 TTS 播报时长不确定，熄屏播报场景必须保证完整播完。
+        wakeLock?.acquire()
+        Log.d(TAG, "WakeLock acquired (no timeout)")
     }
 
     private fun releaseWakeLock() {

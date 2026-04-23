@@ -34,6 +34,11 @@ class TtsAlarmReceiver : BroadcastReceiver() {
         /**
          * 设置下一轮播报的 Alarm（熄屏后通过系统闹钟唤醒）
          * intervalSec: 距现在多少秒后触发
+         *
+         * 权限策略：
+         * - Android 12+ 有 SCHEDULE_EXACT_ALARM 权限 → setExactAndAllowWhileIdle（精确）
+         * - 无精确闹钟权限 → setAndAllowWhileIdle（不精确，但系统会尽量在窗口内触发）
+         * - 重启后 Alarm 会丢失，由 TtsBootReceiver 恢复
          */
         fun scheduleNextReport(context: Context, intervalSec: Int) {
             val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
@@ -49,19 +54,32 @@ class TtsAlarmReceiver : BroadcastReceiver() {
 
             val triggerTime = System.currentTimeMillis() + (intervalSec * 1000L)
 
-            // Android 12+ 检查精确闹钟权限
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (!alarmManager.canScheduleExactAlarms()) {
-                    Log.w(TAG, "Cannot schedule exact alarms - permission not granted")
-                    return
+                if (alarmManager.canScheduleExactAlarms()) {
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerTime,
+                        pendingIntent
+                    )
+                    Log.d(TAG, "Alarm scheduled (exact) in ${intervalSec}s")
+                } else {
+                    // 无精确闹钟权限，降级到 setAndAllowWhileIdle（不精确但可工作）
+                    // 误差可能在分钟级别，但熄屏播报场景仍可接受
+                    alarmManager.setAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerTime,
+                        pendingIntent
+                    )
+                    Log.w(TAG, "Exact alarm permission denied, falling back to setAndAllowWhileIdle")
                 }
+            } else {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerTime,
+                    pendingIntent
+                )
+                Log.d(TAG, "Alarm scheduled (pre-Android12 exact) in ${intervalSec}s")
             }
-
-            alarmManager.setExactAndAllowWhileIdle(
-                AlarmManager.RTC_WAKEUP,
-                triggerTime,
-                pendingIntent
-            )
             Log.d(TAG, "Alarm scheduled in ${intervalSec}s (at ${java.text.SimpleDateFormat("HH:mm:ss").format(java.util.Date(triggerTime))})")
         }
 

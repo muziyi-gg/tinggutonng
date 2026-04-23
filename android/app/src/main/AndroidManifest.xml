@@ -50,6 +50,13 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
+        <!-- 前台保活服务（仅用于标记 App 为"音频类"提升系统优先级） -->
+        <service
+            android:name=".TtsForegroundService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
         <!-- 定时器接收器（AlarmManager 触发 → 启动 TtsBroadcastService） -->
         <receiver
             android:name=".TtsAlarmReceiver"

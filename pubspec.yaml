@@ -20,6 +20,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   shared_preferences: ^2.2.3
   charset_converter: ^2.0.0
+  web_socket_channel: ^2.4.5
 
 
 dev_dependencies:
