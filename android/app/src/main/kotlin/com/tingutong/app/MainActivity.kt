@@ -177,9 +177,8 @@ class MainActivity : FlutterActivity() {
                 android.util.Log.d("MainActivity", "scheduleNextReport: SKIPPED (no permission)")
                 createDebugNotificationChannel()
                 showDebugNotification("❌ 精确闹钟权限被拒！熄屏播报无法工作，请去系统设置开启")
-                // 返回错误码，由 Flutter 端弹对话框引导用户
-                result.error("EXACT_ALARM_PERMISSION_DENIED", "SCHEDULE_EXACT_ALARM permission denied", null)
-                return
+                // 抛异常，由外层 catch 后返回错误码给 Flutter
+                throw SecurityException("SCHEDULE_EXACT_ALARM permission denied")
             } else {
                 android.util.Log.d("MainActivity", "SCHEDULE_EXACT_ALARM permission OK")
             }
