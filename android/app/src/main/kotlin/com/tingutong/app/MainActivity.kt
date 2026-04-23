@@ -12,7 +12,6 @@ import android.os.Bundle
 import android.provider.Settings
 import android.net.Uri
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -73,6 +72,16 @@ class MainActivity : FlutterActivity() {
                     saveReportingConfig(interval, stockNamesJson, stockCodesJson)
                     // Alarm 已在 scheduleNextReport 中更新，不需要重新设置
                     result.success(true)
+                }
+                "openExactAlarmSettings" -> {
+                    // 打开精确闹钟权限设置页面
+                    try {
+                        val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("OPEN_SETTINGS_ERROR", e.message, null)
+                    }
                 }
 
                 // ─────────────────────────────────────────
@@ -168,18 +177,8 @@ class MainActivity : FlutterActivity() {
                 android.util.Log.d("MainActivity", "scheduleNextReport: SKIPPED (no permission)")
                 createDebugNotificationChannel()
                 showDebugNotification("❌ 精确闹钟权限被拒！熄屏播报无法工作，请去系统设置开启")
-                // 弹对话框，引导用户去精确闹钟权限页面
-                runOnUiThread {
-                    AlertDialog.Builder(this)
-                        .setTitle("⚠️ 精确闹钟权限被拒")
-                        .setMessage("熄屏播报需要「精确闹钟」权限才能在屏幕关闭时触发语音播报。\n\n请在弹出的页面中找到「听股通」，并开启「允许设置精确闹钟」选项。")
-                        .setPositiveButton("去设置") { _, _ ->
-                            val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
-                            startActivity(intent)
-                        }
-                        .setNegativeButton("取消", null)
-                        .show()
-                }
+                // 返回错误码，由 Flutter 端弹对话框引导用户
+                result.error("EXACT_ALARM_PERMISSION_DENIED", "SCHEDULE_EXACT_ALARM permission denied", null)
                 return
             } else {
                 android.util.Log.d("MainActivity", "SCHEDULE_EXACT_ALARM permission OK")

@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import '../app.dart';
 
 enum TtsState { idle, playing, stopped, error }
 
@@ -295,11 +297,11 @@ class TtsService with WidgetsBindingObserver {
 
   /// 启动后台播报（AlarmManager 定时 + 股票配置持久化）
   /// 前后台统一：前台由 stock_provider 的 Timer 驱动，后台由 AlarmManager 驱动
-  Future<void> startBackgroundReporting({
+  Future<bool> startBackgroundReporting({
     required int intervalSec,
     required List<MapEntry<String, String>> stocks,
   }) async {
-    if (!_isAndroid) return;
+    if (!_isAndroid) return false;
     final namesJson = <String, String>{};
     final codesJson = <String>[];
     for (final s in stocks) {
@@ -314,9 +316,46 @@ class TtsService with WidgetsBindingObserver {
       });
       _backgroundReportingActive = true;
       _log('debug', 'startBackgroundReporting: interval=${intervalSec}s, stocks=${stocks.length}');
+      return true;
+    } on PlatformException catch (e) {
+      _log('debug', 'startBackgroundReporting failed: ${e.code} - ${e.message}');
+      if (e.code == 'EXACT_ALARM_PERMISSION_DENIED') {
+        // 精确闹钟权限缺失，Flutter 端弹对话框引导用户
+        _showExactAlarmPermissionDialog();
+      }
+      return false;
     } catch (e) {
       _log('debug', 'startBackgroundReporting failed: $e');
+      return false;
     }
+  }
+
+  /// 弹出精确闹钟权限引导对话框
+  void _showExactAlarmPermissionDialog() {
+    navigatorKey.currentState?.push(
+      DialogRoute<void>(
+        context: navigatorKey.currentContext!,
+        builder: (ctx) => AlertDialog(
+          title: const Text('⚠️ 精确闹钟权限被拒'),
+          content: const Text(
+            '熄屏播报需要「精确闹钟」权限才能在屏幕关闭时触发语音播报。\n\n请在弹出的页面中找到「听股通」，并开启「允许设置精确闹钟」选项。',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('取消'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                _serviceChannel.invokeMethod('openExactAlarmSettings');
+                Navigator.of(ctx).pop();
+              },
+              child: const Text('去设置'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// 停止后台播报（取消 AlarmManager）

@@ -8,6 +8,9 @@ import 'screens/stock_list_screen.dart';
 import 'screens/monitor_settings_screen.dart';
 import 'screens/tts_debug_screen.dart';
 
+// 全局 NavigatorKey，供非 UI 层（如 service）弹出对话框
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
 class TingutongApp extends StatefulWidget {
   const TingutongApp({super.key});
   @override
@@ -57,6 +60,7 @@ class _TingutongAppState extends State<TingutongApp> {
         ChangeNotifierProvider(create: (_) => ConfigProvider()),
       ],
       child: MaterialApp(
+        navigatorKey: navigatorKey,
         title: '听股通',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
