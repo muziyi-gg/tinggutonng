@@ -54,6 +54,11 @@ class MainActivity : FlutterActivity() {
 
                         android.util.Log.d("MainActivity", ">>> startBackgroundReporting done")
                         result.success(true)
+                    } catch (e: SecurityException) {
+                        // Android 12+ SCHEDULE_EXACT_ALARM 权限缺失 → Flutter 端弹对话框引导
+                        android.util.Log.w("MainActivity", "SCHEDULE_EXACT_ALARM permission denied: ${e.message}")
+                        showDebugNotification("⚠️ 精确闹钟权限被拒，请去系统设置开启")
+                        result.error("EXACT_ALARM_PERMISSION_DENIED", "SCHEDULE_EXACT_ALARM permission denied: ${e.message}", null)
                     } catch (e: Exception) {
                         android.util.Log.e("MainActivity", "!!! startBackgroundReporting EXCEPTION: ${e.message}")
                         showDebugNotification("❌ startBackgroundReporting 异常：${e.message}")
