@@ -530,7 +530,7 @@ class TtsBroadcastService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(if (isPlaying) "听股通正在播报" else "听股通播报服务")
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setSmallIcon(R.drawable.ic_tts_notification)
             .setOngoing(isPlaying)
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -541,7 +541,7 @@ class TtsBroadcastService : Service() {
                     .setMediaSession(mediaSession?.sessionToken)
                     .setShowActionsInCompactView(0)
             )
-            .addAction(android.R.drawable.ic_media_pause, "停止", stopPendingIntent)
+            .addAction(R.drawable.ic_tts_notification, "停止", stopPendingIntent)
             .build()
     }
 
@@ -574,7 +574,7 @@ class TtsBroadcastService : Service() {
 
         val nm = getSystemService(NotificationManager::class.java)
         val notification = android.app.Notification.Builder(this, DEBUG_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_tts_notification)
             .setContentTitle("🎧 【听股通】TtsBroadcastService 已启动！")
             .setContentText("熄屏播报服务正在运行，正在合成语音...")
             .setPriority(android.app.Notification.PRIORITY_MAX)

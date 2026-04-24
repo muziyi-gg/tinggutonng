@@ -351,7 +351,7 @@ class MainActivity : FlutterActivity() {
         // 取消旧通知，发送新通知（每次更新，不累积）
         nm.cancel(DEBUG_NOTIFICATION_ID)
         val notification = android.app.Notification.Builder(this, DEBUG_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_tts_notification)
             .setContentTitle("【听股通】")
             .setContentText(message)
             .setPriority(android.app.Notification.PRIORITY_HIGH)
