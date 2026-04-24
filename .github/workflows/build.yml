@@ -26,27 +26,15 @@ jobs:
         run: flutter pub get
 
       - name: Build release APK
-        run: |
-          flutter build apk --release 2>&1 | tee /tmp/build.log
-          echo "---BUILD EXIT CODE: $?---"
+        run: flutter build apk --release
 
-      - name: Capture build error
-        if: failure()
-        run: |
-          echo "=== BUILD LOG ===" && cat /tmp/build.log || echo "No log found"
-          echo "=== END BUILD LOG ==="
-
-      - name: Upload build log on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log-${{ github.run_id }}
-          path: /tmp/build.log
-
-      - name: Upload APK
+      - name: Create GitHub Release
         if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: tingutong-release-apk-${{ github.run_id }}
-          path: build/app/outputs/flutter-apk/
-          retention-days: 7
+        run: |
+          cd build/app/outputs/flutter-apk
+          gh release create v${{ github.run_number }} \
+            --title "听股通 v${{ github.run_number }}" \
+            --notes "Build #${GITHUB_RUN_NUMBER} - 自动构建" \
+            app-release.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
