@@ -387,8 +387,9 @@ class TtsService with WidgetsBindingObserver {
     final isRestrictive = await isRestrictiveManufacturer();
     if (!isRestrictive) return; // 非限制性厂商无需引导
 
-    if (!navigatorKey.currentState.mounted) return;
-    final ctx = navigatorKey.currentContext!;
+    final state = navigatorKey.currentState;
+    if (state == null || !state.mounted) return;
+    final ctx = state.context;
 
     await showDialog<void>(
       context: ctx,
