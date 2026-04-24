@@ -1,5 +1,7 @@
 name: Build Android APK
 
+# CI/CD workflow for building Android release APK
+
 on:
   push:
     branches: [ main ]
