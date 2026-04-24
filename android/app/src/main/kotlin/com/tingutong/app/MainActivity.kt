@@ -13,6 +13,7 @@ import android.net.Uri
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import androidx.core.app.NotificationCompat
 
 class MainActivity : FlutterActivity() {
 
@@ -350,11 +351,11 @@ class MainActivity : FlutterActivity() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         // 取消旧通知，发送新通知（每次更新，不累积）
         nm.cancel(DEBUG_NOTIFICATION_ID)
-        val notification = android.app.Notification.Builder(this, DEBUG_CHANNEL_ID)
+        val notification = NotificationCompat.Builder(this, DEBUG_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_tts_notification)
             .setContentTitle("【听股通】")
             .setContentText(message)
-            .setPriority(android.app.Notification.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .build()
         nm.notify(DEBUG_NOTIFICATION_ID, notification)

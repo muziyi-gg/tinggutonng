@@ -574,11 +574,11 @@ class TtsBroadcastService : Service() {
         }
 
         val nm = getSystemService(NotificationManager::class.java)
-        val notification = android.app.Notification.Builder(this, DEBUG_CHANNEL_ID)
+        val notification = NotificationCompat.Builder(this, DEBUG_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_tts_notification)
             .setContentTitle("🎧 【听股通】TtsBroadcastService 已启动！")
             .setContentText("熄屏播报服务正在运行，正在合成语音...")
-            .setPriority(android.app.Notification.PRIORITY_MAX)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
             .setAutoCancel(false)
             .setOngoing(true)
             .build()
