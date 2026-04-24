@@ -11,8 +11,8 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
-import android.support.v4.media.session.MediaSessionCompat
-import android.support.v4.media.session.PlaybackStateCompat
+import androidx.media.session.MediaSessionCompat
+import androidx.media.session.PlaybackStateCompat
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.media.app.NotificationCompat.MediaStyle
@@ -192,9 +192,9 @@ class TtsBroadcastService : Service() {
             setPlaybackState(state)
 
             // 元数据：播报中
-            val metadata = android.support.v4.media.MediaMetadataCompat.Builder()
-                .putString(android.support.v4.media.MediaMetadataCompat.METADATA_KEY_TITLE, "听股通播报中")
-                .putString(android.support.v4.media.MediaMetadataCompat.METADATA_KEY_ARTIST, "行情播报")
+            val metadata = androidx.media.MediaMetadataCompat.Builder()
+                .putString(androidx.media.MediaMetadataCompat.METADATA_KEY_TITLE, "听股通播报中")
+                .putString(androidx.media.MediaMetadataCompat.METADATA_KEY_ARTIST, "行情播报")
                 .build()
             setMetadata(metadata)
 
