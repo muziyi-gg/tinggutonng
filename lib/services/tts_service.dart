@@ -332,28 +332,28 @@ class TtsService with WidgetsBindingObserver {
 
   /// 弹出精确闹钟权限引导对话框
   void _showExactAlarmPermissionDialog() {
-    navigatorKey.currentState?.push(
-      DialogRoute<void>(
-        context: navigatorKey.currentContext!,
-        builder: (ctx) => AlertDialog(
-          title: const Text('⚠️ 精确闹钟权限被拒'),
-          content: const Text(
-            '熄屏播报需要「精确闹钟」权限才能在屏幕关闭时触发语音播报。\n\n请在弹出的页面中找到「听股通」，并开启「允许设置精确闹钟」选项。',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('取消'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                _serviceChannel.invokeMethod('openExactAlarmSettings');
-                Navigator.of(ctx).pop();
-              },
-              child: const Text('去设置'),
-            ),
-          ],
+    final ctx = navigatorKey.currentContext;
+    if (ctx == null) return;
+    showDialog<void>(
+      context: ctx,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('⚠️ 精确闹钟权限被拒'),
+        content: const Text(
+          '熄屏播报需要「精确闹钟」权限才能在屏幕关闭时触发语音播报。\n\n请在弹出的页面中找到「听股通」，并开启「允许设置精确闹钟」选项。',
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              _serviceChannel.invokeMethod('openExactAlarmSettings');
+              Navigator.of(dialogCtx).pop();
+            },
+            child: const Text('去设置'),
+          ),
+        ],
       ),
     );
   }
