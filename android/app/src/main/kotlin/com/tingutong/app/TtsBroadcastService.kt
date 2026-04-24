@@ -503,7 +503,7 @@ class TtsBroadcastService : Service() {
                 // 音频类 App：通知静音，不发出声音
                 setSound(null, null)
                 // 允许在锁屏和媒体控制器上显示
-                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                setLockscreenVisibility(Notification.VISIBILITY_PUBLIC)
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
