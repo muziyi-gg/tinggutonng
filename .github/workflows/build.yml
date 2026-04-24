@@ -1,7 +1,5 @@
 name: Build Android APK
 
-# CI/CD workflow for building Android release APK
-
 on:
   push:
     branches: [ main ]
@@ -28,9 +26,25 @@ jobs:
         run: flutter pub get
 
       - name: Build release APK
-        run: flutter build apk --release
+        run: |
+          flutter build apk --release 2>&1 | tee /tmp/build.log
+          echo "---BUILD EXIT CODE: $?---"
+
+      - name: Capture build error
+        if: failure()
+        run: |
+          echo "=== BUILD LOG ===" && cat /tmp/build.log || echo "No log found"
+          echo "=== END BUILD LOG ==="
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ github.run_id }}
+          path: /tmp/build.log
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: tingutong-release-apk-${{ github.run_id }}
