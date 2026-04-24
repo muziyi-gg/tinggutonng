@@ -27,8 +27,8 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Build release APK (ABI splits)
-        run: flutter build apk --release --split-per-abi --tree-shake-icons
+      - name: Build release APK
+        run: flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
