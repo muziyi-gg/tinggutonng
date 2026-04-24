@@ -263,6 +263,9 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
     _reportTimer?.cancel();
     _log('report', 'startReport: _speaking=true, starting timer every ${_reportIntervalSec}s');
 
+    // 首次开启播报时引导用户设置电池优化白名单（国产手机必须）
+    _showBatteryGuideIfNeeded();
+
     // 立即激活 AlarmManager（与 _speaking 解耦，只要用户开启播报就设置）
     _activateBackgroundTimer();
 
@@ -273,6 +276,15 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
       (_) => _reportAll(),
     );
     notifyListeners();
+  }
+
+  /// 首次开启播报时提示电池优化引导（只提示一次）
+  bool _batteryGuideShown = false;
+  void _showBatteryGuideIfNeeded() {
+    if (_batteryGuideShown) return;
+    _batteryGuideShown = true;
+    // 异步弹出对话框，不阻塞播报启动
+    Future.microtask(() => _tts.showBatteryOptimizationDialog());
   }
 
   void setReportInterval(int seconds) {

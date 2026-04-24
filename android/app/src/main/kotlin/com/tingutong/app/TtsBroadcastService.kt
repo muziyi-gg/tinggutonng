@@ -126,6 +126,15 @@ class TtsBroadcastService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         android.util.Log.d(TAG, ">>> TtsBroadcastService onStartCommand: action=${intent?.action}")
 
+        // ─── 立即获取 WakeLock（熄屏保活的关键！）─────────────────
+        // 在主线程获取，不依赖子线程。即使手机进入 Doze 深度休眠，
+        // WakeLock 也能保证 CPU 持续运行，Service 不会被杀死。
+        try {
+            acquireWakeLock()
+        } catch (e: Throwable) {
+            android.util.Log.e(TAG, "acquireWakeLock failed: $e")
+        }
+
         when (intent?.action) {
             ACTION_STOP -> {
                 stopSelf()
@@ -134,10 +143,20 @@ class TtsBroadcastService : Service() {
             ACTION_SPEAK_REPORT -> {
                 reportInterval = intent.getIntExtra("report_interval", defaultIntervalSec)
                 startForeground(NOTIFICATION_ID, buildNotification("正在播报行情...", isPlaying = true))
-                loadAndSpeakStocks()
+                // 读取股票配置（在主线程同步完成，避免子线程竞态）
+                val stocks = loadStocksFromPrefs()
+                if (stocks.isEmpty()) {
+                    android.util.Log.w(TAG, "No stocks to report")
+                    scheduleNextAlarm()
+                    // 延迟销毁，不立即 stopSelf
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ stopSelf() }, 60000)
+                } else {
+                    loadAndSpeakStocks(stocks)
+                }
             }
         }
-        return START_NOT_STICKY
+        // START_STICKY：系统杀死后重生，重生时走 ACTION_SPEAK_REPORT 路径重新播报
+        return START_STICKY
     }
 
     override fun onDestroy() {
@@ -261,10 +280,10 @@ class TtsBroadcastService : Service() {
         }
     }
 
+// ═══════════════════════════════════════════
+    // 加载股票数据（主线程同步读取 SharedPreferences）
     // ═══════════════════════════════════════════
-    // 加载股票数据并开始播报
-    // ═══════════════════════════════════════════
-    private fun loadAndSpeakStocks() {
+    private fun loadStocksFromPrefs(): List<Pair<String, String>> {
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val stockNamesRaw = prefs.getString(KEY_STOCK_NAMES, null)
 
@@ -277,7 +296,7 @@ class TtsBroadcastService : Service() {
                     code to json.getString(code)
                 }.toList()
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to parse stock names: $e")
+                android.util.Log.e(TAG, "Failed to parse stock names: $e")
             }
         }
 
@@ -291,15 +310,24 @@ class TtsBroadcastService : Service() {
                         obj.getString("code") to obj.getString("name")
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to parse watchlist: $e")
+                    android.util.Log.e(TAG, "Failed to parse watchlist: $e")
                 }
             }
         }
 
+        return stocks
+    }
+
+    // ═══════════════════════════════════════════
+    // 加载股票数据并开始播报（从 onStartCommand 传入）
+    // WakeLock 已由 onStartCommand 主线程获取，这里只做网络请求
+    // ═══════════════════════════════════════════
+    private fun loadAndSpeakStocks(stocks: List<Pair<String, String>>) {
         if (stocks.isEmpty()) {
-            Log.w(TAG, "No stocks to report, stopping")
+            android.util.Log.w(TAG, "No stocks to report, scheduling next alarm")
             scheduleNextAlarm()
-            stopSelf()
+            // 延迟销毁，给用户切回 App 的时间
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ stopSelf() }, 60000)
             return
         }
 
@@ -307,15 +335,6 @@ class TtsBroadcastService : Service() {
     }
 
     private fun fetchPricesAndSpeak(stocks: List<Pair<String, String>>) {
-        // ─── 立即获取 WakeLock（熄屏保活的关键！）
-        // 必须在外层获取，不能等网络请求完成后再获取。
-        // 否则系统可能在 fetch 过程中进入 Doze 深度休眠，导致请求挂死。
-        try {
-            acquireWakeLock()
-        } catch (e: Throwable) {
-            android.util.Log.e(TAG, "acquireWakeLock failed: $e")
-        }
-
         Thread {
             try {
                 val codes = stocks.joinToString(",") { it.first }
@@ -381,12 +400,18 @@ class TtsBroadcastService : Service() {
 
     private fun speakNext() {
         if (currentIndex >= speakQueue.size) {
-            Log.d(TAG, "All stocks reported, scheduling next alarm in ${reportInterval}s")
+            android.util.Log.d(TAG, "All stocks reported, scheduling next alarm in ${reportInterval}s")
             releaseWakeLock()
             scheduleNextAlarm()
+            // ✅ 延迟销毁（不立即 stopSelf）：
+            // 保留 Service 实例 5 分钟，给用户切回 App 的时间
+            // 如果用户切回前台，Flutter 层的 Timer 会接管，不再需要原生 Service
+            // 如果 5 分钟后用户仍未切回，系统会自动销毁此 Service（节省资源）
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                stopSelf()
+            }, 300000) // 5 分钟
             // 播完更新通知为非播放状态
-            updateNotification("播报完成", isPlaying = false)
-            stopSelf()
+            updateNotification("播报完成，等待下次播报", isPlaying = false)
             return
         }
 

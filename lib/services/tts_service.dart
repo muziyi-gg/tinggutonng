@@ -358,6 +358,67 @@ class TtsService with WidgetsBindingObserver {
     );
   }
 
+  /// 引导用户设置电池优化白名单（国产手机必须）
+  /// 这是确保熄屏播报在国产手机上正常工作的关键步骤
+  Future<void> guideBatteryOptimization() async {
+    if (!_isAndroid) return;
+    try {
+      // 打开厂商特定电池优化设置页面
+      await _serviceChannel.invokeMethod('guideBatteryOptimization');
+      _log('debug', 'guideBatteryOptimization: opened');
+    } catch (e) {
+      _log('debug', 'guideBatteryOptimization failed: $e');
+    }
+  }
+
+  /// 检测是否为后台限制严格的厂商
+  Future<bool> isRestrictiveManufacturer() async {
+    if (!_isAndroid) return false;
+    try {
+      final result = await _serviceChannel.invokeMethod<bool>('isManufacturerWithRestrictiveBackground');
+      return result ?? false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// 弹出电池优化引导对话框（首次开启播报时调用）
+  Future<void> showBatteryOptimizationDialog() async {
+    final isRestrictive = await isRestrictiveManufacturer();
+    if (!isRestrictive) return; // 非限制性厂商无需引导
+
+    if (!navigatorKey.currentState.mounted) return;
+    final ctx = navigatorKey.currentContext!;
+
+    await showDialog<void>(
+      context: ctx,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('🔋 电池优化设置'),
+        content: const Text(
+          '检测到您使用的是国产手机，这些手机后台管理非常严格。\n\n'
+          '为确保熄屏播报正常工作，请完成以下设置：\n\n'
+          '1️⃣ 在弹出的页面中，将「听股通」设为「无限制」或「允许后台活动」\n\n'
+          '2️⃣ 开启「自启动」权限\n\n'
+          '3️⃣ 关闭「省电模式」或将其设为「无限制」\n\n'
+          '⚠️ 如果不完成这些设置，熄屏后播报可能被系统自动拦截。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(),
+            child: const Text('稍后再说'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(dialogCtx).pop();
+              guideBatteryOptimization();
+            },
+            child: const Text('去设置'),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// 停止后台播报（取消 AlarmManager）
   Future<void> stopBackgroundReporting() async {
     if (!_isAndroid) return;
