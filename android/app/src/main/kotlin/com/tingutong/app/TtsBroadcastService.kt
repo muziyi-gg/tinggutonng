@@ -37,6 +37,8 @@ class TtsBroadcastService : Service() {
         const val TAG = "TtsBroadcastService"
         const val ACTION_SPEAK_REPORT = "com.tingutong.app.ACTION_SPEAK_REPORT"
         const val ACTION_STOP = "com.tingutong.app.ACTION_STOP_TTS_SERVICE"
+        const val ACTION_PAUSE = "com.tingutong.app.ACTION_PAUSE_TTS"
+        const val ACTION_RESUME = "com.tingutong.app.ACTION_RESUME_TTS"
 
         const val CHANNEL_ID = "tingutong_tts_channel"
         const val CHANNEL_NAME = "听股通播报服务"
@@ -68,6 +70,7 @@ class TtsBroadcastService : Service() {
     private var speakQueue: MutableList<String> = mutableListOf()
     private var currentIndex = 0
     private var reportInterval = 60
+    private var isPaused = false
 
     // ─── 音频焦点 & MediaSession ───
     private var mediaSession: MediaSessionCompat? = null
@@ -138,8 +141,27 @@ class TtsBroadcastService : Service() {
 
         when (intent?.action) {
             ACTION_STOP -> {
+                isPaused = false
                 stopSelf()
                 return START_NOT_STICKY
+            }
+            ACTION_PAUSE -> {
+                isPaused = true
+                tts?.stop()
+                updateMediaSessionState(PlaybackStateCompat.STATE_PAUSED)
+                updateNotification("已暂停", isPlaying = false)
+                mediaSession?.setPlaybackState(PlaybackStateCompat.Builder()
+                    .setState(PlaybackStateCompat.STATE_PAUSED, currentIndex.toLong(), 0f)
+                    .build())
+                Log.d(TAG, "TTS paused at index $currentIndex")
+                return START_STICKY
+            }
+            ACTION_RESUME -> {
+                isPaused = false
+                if (currentIndex < speakQueue.size) {
+                    speakNext()
+                }
+                return START_STICKY
             }
             ACTION_SPEAK_REPORT -> {
                 reportInterval = intent.getIntExtra("report_interval", defaultIntervalSec)
@@ -400,6 +422,10 @@ class TtsBroadcastService : Service() {
     }
 
     private fun speakNext() {
+        if (isPaused) {
+            Log.d(TAG, "speakNext skipped: paused")
+            return
+        }
         if (currentIndex >= speakQueue.size) {
             android.util.Log.d(TAG, "All stocks reported, scheduling next alarm in ${reportInterval}s")
             releaseWakeLock()
@@ -528,6 +554,17 @@ class TtsBroadcastService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        // 暂停/继续 按钮
+        val playPauseIntent = Intent(this, TtsBroadcastService::class.java).apply {
+            action = if (isPlaying) ACTION_PAUSE else ACTION_RESUME
+        }
+        val playPausePendingIntent = PendingIntent.getService(
+            this, 2, playPauseIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val playPauseIcon = if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+        val playPauseTitle = if (isPlaying) "暂停" else "继续"
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(if (isPlaying) "听股通正在播报" else "听股通播报服务")
             .setContentText(text)
@@ -540,9 +577,10 @@ class TtsBroadcastService : Service() {
             .setStyle(
                 MediaStyle()
                     .setMediaSession(mediaSession?.sessionToken)
-                    .setShowActionsInCompactView(0)
+                    .setShowActionsInCompactView(0, 1)
             )
-            .addAction(R.drawable.ic_tts_notification, "停止", stopPendingIntent)
+            .addAction(playPauseIcon, playPauseTitle, playPausePendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "停止", stopPendingIntent)
             .build()
     }
 
