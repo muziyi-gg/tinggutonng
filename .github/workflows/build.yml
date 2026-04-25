@@ -3,6 +3,8 @@ name: Build Android APK
 on:
   push:
     branches: [ main ]
+    paths-ignore:
+      - '.github/workflows/**'
   workflow_dispatch:
 
 jobs:
@@ -19,29 +21,31 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Clean stale build cache
-        run: flutter clean
-
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Build release APK
+      - name: Build release APK (with retry)
         run: |
+          set -o pipefail
           flutter build apk --release 2>&1 | tee /tmp/build.log
-          echo "---BUILD EXIT CODE: $?---"
+          EXIT=${PIPESTATUS[0]}
+          echo "---BUILD EXIT: $EXIT---" >> /tmp/build.log
+          if [ $EXIT -ne 0 ]; then
+            echo "Retry in 15s..." >> /tmp/build.log
+            sleep 15
+            flutter build apk --release 2>&1 | tee -a /tmp/build.log
+            EXIT2=${PIPESTATUS[0]}
+            echo "---RETRY EXIT: $EXIT2---" >> /tmp/build.log
+          fi
+          exit $EXIT
 
-      - name: Capture build error
-        if: failure()
-        run: |
-          echo "=== BUILD LOG ===" && cat /tmp/build.log || echo "No log found"
-          echo "=== END BUILD LOG ==="
-
-      - name: Upload build log on failure
-        if: failure()
+      - name: Capture build log artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-log-${{ github.run_id }}
           path: /tmp/build.log
+          retention-days: 3
 
       - name: Upload APK via GitHub Release
         if: success()
