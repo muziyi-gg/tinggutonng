@@ -27,40 +27,28 @@ jobs:
 
       - name: Build release APK
         run: |
-          set -o pipefail
-          flutter build apk --release > /tmp/build.log 2>&1
-          EXIT_CODE=$?
-          echo "EXIT_CODE=$EXIT_CODE" >> $GITHUB_ENV
-          echo "=== BUILD EXIT CODE: $EXIT_CODE ===" >> /tmp/build.log
-          if [ -f build/app/outputs/flutter-apk/app-release.apk ]; then
-            echo "APK_SIZE=$(stat -c%s build/app/outputs/flutter-apk/app-release.apk)" >> $GITHUB_ENV
-          fi
+          flutter build apk --release 2>&1 | tee /tmp/build.log
+          echo "---BUILD EXIT CODE: $?---"
 
-      - name: Upload APK via GitHub Release
-        if: success()
-        uses: softprops/action-gh-release@v2
-        with:
-          files: build/app/outputs/flutter-apk/app-release.apk
-          name: 听股通 v${{ github.run_number }}
-          body: "自动构建 #${GITHUB_RUN_NUMBER}"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Capture build error
+        if: failure()
+        run: |
+          echo "=== BUILD LOG ===" && cat /tmp/build.log || echo "No log found"
+          echo "=== END BUILD LOG ==="
 
-      - name: Upload build log
-        if: always()
+      - name: Upload build log on failure
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: build-log-${{ github.run_id }}
           path: /tmp/build.log
-          retention-days: 1
 
-      - name: Create GitHub Release on failure (with error log)
-        if: failure()
-        uses: softprops/action-gh-release@v2
+      - name: Upload APK via GitHub Release
+        if: success()
+        uses: softprops/action-gh-release@v1
         with:
-          tag_name: build-error-v${{ github.run_number }}
-          name: 构建失败 v${{ github.run_number }}
-          body: "构建失败，请检查 log"
-          files: /tmp/build.log
+          files: build/app/outputs/flutter-apk/app-release.apk
+          name: 听股通 v${{ github.run_number }}
+          body: "Build #${GITHUB_RUN_NUMBER}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
