@@ -27,9 +27,13 @@ jobs:
       - name: Build release APK
         id: build
         run: |
+          set -o pipefail
           flutter build apk --release 2>&1 | tee /tmp/build.log
-          echo "EXIT_CODE=${PIPESTATUS[0]}" >> $GITHUB_ENV
-          echo "Build completed with exit code ${PIPESTATUS[0]}"
+          EXIT=${PIPESTATUS[0]}
+          echo "EXIT_CODE=$EXIT" >> $GITHUB_ENV
+          echo "Build exit code: $EXIT"
+          [ $EXIT -ne 0 ] && echo "---BUILD FAILED---" >> /tmp/build.log
+          exit $EXIT
 
       - name: Post build log to workflow run comments
         if: always()

@@ -14,5 +14,6 @@ void main() async {
     await Permission.notification.request();
   }
 
+  // 听股通 v1.4.10-dev
   runApp(const TingutongApp());
 }
