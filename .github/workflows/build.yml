@@ -25,31 +25,42 @@ jobs:
         run: flutter pub get
 
       - name: Build release APK
+        id: build
         run: |
           flutter build apk --release 2>&1 | tee /tmp/build.log
-          EXIT=${PIPESTATUS[0]}
-          echo "---EXIT:$EXIT---" >> /tmp/build.log
-          exit $EXIT
+          echo "EXIT_CODE=${PIPESTATUS[0]}" >> $GITHUB_ENV
+          echo "Build completed with exit code ${PIPESTATUS[0]}"
 
-      - name: Publish APK + build log as GitHub Release
-        if: success()
+      - name: Post build log to workflow run comments
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const log = fs.readFileSync('/tmp/build.log', 'utf-8');
+            const shortLog = log.slice(-6000); // last 6000 chars
+            const status = log.includes('EXIT_CODE=0') ? '✅ SUCCESS' : '❌ FAILED';
+            await github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: `## ${status} | Build Log (last 6KB)\n\n\`\`\`\n${shortLog}\n\`\`\``
+            });
+            // Also update the run
+            await github.rest.actions.createWorkflowJob({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+              status: 'completed'
+            });
+
+      - name: Upload APK via GitHub Release
+        if: env.EXIT_CODE == '0'
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            build/app/outputs/flutter-apk/app-release.apk
-            /tmp/build.log
+          files: build/app/outputs/flutter-apk/app-release.apk
           name: 听股通 v${{ github.run_number }}
           body: "Build #${GITHUB_RUN_NUMBER}"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Publish build log as GitHub Release on failure
-        if: failure()
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: build-error-v${{ github.run_number }}
-          name: 构建失败 v${{ github.run_number }}
-          body: "查看 build.log 附件获取详细错误信息"
-          files: /tmp/build.log
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
