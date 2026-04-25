@@ -3,6 +3,7 @@ package com.tingutong.app
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.Service
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
@@ -73,11 +74,16 @@ class TtsForegroundService : Service() {
                 stopSelf()
                 return START_NOT_STICKY
             }
-            ACTION_START, else -> {
+            ACTION_START -> {
                 // 启动前台服务，显示持续通知
                 isRunning = true
                 startForeground(NOTIFICATION_ID, buildNotification("听股通后台持续运行中"))
                 // START_STICKY：系统杀死后重生，继续保活
+                return START_STICKY
+            }
+            else -> {
+                isRunning = true
+                startForeground(NOTIFICATION_ID, buildNotification("听股通后台持续运行中"))
                 return START_STICKY
             }
         }
