@@ -24,35 +24,32 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Build release APK (with retry)
+      - name: Build release APK
         run: |
-          set -o pipefail
           flutter build apk --release 2>&1 | tee /tmp/build.log
           EXIT=${PIPESTATUS[0]}
-          echo "---BUILD EXIT: $EXIT---" >> /tmp/build.log
-          if [ $EXIT -ne 0 ]; then
-            echo "Retry in 15s..." >> /tmp/build.log
-            sleep 15
-            flutter build apk --release 2>&1 | tee -a /tmp/build.log
-            EXIT2=${PIPESTATUS[0]}
-            echo "---RETRY EXIT: $EXIT2---" >> /tmp/build.log
-          fi
+          echo "---EXIT:$EXIT---" >> /tmp/build.log
           exit $EXIT
 
-      - name: Capture build log artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log-${{ github.run_id }}
-          path: /tmp/build.log
-          retention-days: 3
-
-      - name: Upload APK via GitHub Release
+      - name: Publish APK + build log as GitHub Release
         if: success()
         uses: softprops/action-gh-release@v1
         with:
-          files: build/app/outputs/flutter-apk/app-release.apk
+          files: |
+            build/app/outputs/flutter-apk/app-release.apk
+            /tmp/build.log
           name: 听股通 v${{ github.run_number }}
           body: "Build #${GITHUB_RUN_NUMBER}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish build log as GitHub Release on failure
+        if: failure()
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: build-error-v${{ github.run_number }}
+          name: 构建失败 v${{ github.run_number }}
+          body: "查看 build.log 附件获取详细错误信息"
+          files: /tmp/build.log
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
