@@ -28,10 +28,13 @@ jobs:
       - name: Build release APK
         run: |
           set -o pipefail
-          flutter build apk --release 2>&1 | tee /tmp/build.log
-          EXIT_CODE=${PIPESTATUS[0]}
-          echo "BUILD_EXIT_CODE=$EXIT_CODE" >> $GITHUB_ENV
-          echo "=== BUILD EXIT CODE: $EXIT_CODE ==="
+          flutter build apk --release > /tmp/build.log 2>&1
+          EXIT_CODE=$?
+          echo "EXIT_CODE=$EXIT_CODE" >> $GITHUB_ENV
+          echo "=== BUILD EXIT CODE: $EXIT_CODE ===" >> /tmp/build.log
+          if [ -f build/app/outputs/flutter-apk/app-release.apk ]; then
+            echo "APK_SIZE=$(stat -c%s build/app/outputs/flutter-apk/app-release.apk)" >> $GITHUB_ENV
+          fi
 
       - name: Upload APK via GitHub Release
         if: success()
@@ -43,9 +46,21 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload build log on failure
-        if: failure()
+      - name: Upload build log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-log-${{ github.run_id }}
           path: /tmp/build.log
+          retention-days: 1
+
+      - name: Create GitHub Release on failure (with error log)
+        if: failure()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-error-v${{ github.run_number }}
+          name: 构建失败 v${{ github.run_number }}
+          body: "构建失败，请检查 log"
+          files: /tmp/build.log
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
