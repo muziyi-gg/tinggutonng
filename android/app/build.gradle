@@ -48,13 +48,33 @@ android {
     buildTypes {
         release {
             signingConfig signingConfigs.debug
-            minifyEnabled false
-            shrinkResources false
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            minifyEnabled true
+            shrinkResources true
+            splits {
+                abi {
+                    enable true
+                    reset()
+                    include 'arm64-v8a'  // 只打包 64 位 ARM
+                    universalApk false
+                }
+            }
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
     lintOptions {
         abortOnError false
         checkReleaseBuilds false
+    }
+
+    applicationVariants.all { variant ->
+        variant.outputs.all { output ->
+            output.outputFileName = "tinggutong_${variant.versionName}_${variant.versionCode}.apk"
+        }
     }
 }
 
@@ -63,6 +83,7 @@ flutter {
 }
 
 dependencies {
+    implementation 'androidx.activity:activity-ktx:1.8.2'
     implementation 'androidx.multidex:multidex:2.0.1'
     implementation 'androidx.media:media:1.7.0'
     implementation 'androidx.core:core:1.12.0'

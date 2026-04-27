@@ -63,6 +63,9 @@ class TtsBroadcastService : Service() {
         const val PRIORITY_P2 = 2  // 板块异动/集合竞价
         const val PRIORITY_P3 = 3  // 大盘异动
         const val PRIORITY_P4 = 4  // 自选股定时播报
+
+        // MainActivity 注册后持有此引用，Flutter 端监听时写入
+        var serviceEventSink: EventChannel.EventSink? = null
     }
 
     // TTS
@@ -172,12 +175,7 @@ class TtsBroadcastService : Service() {
     // ═══════════════════════════════════════════
     // Flutter EventChannel：向 Flutter 推送播报状态
     // 模式：静态 EventSink 持有者（MainActivity 注册，TtsBroadcastService 写入）
-    // ═══════════════════════════════════════════
-
-    companion object {
-        // MainActivity 注册后持有此引用，Flutter 端监听时写入
-        var serviceEventSink: EventChannel.EventSink? = null
-    }
+    // （serviceEventSink 已移至 companion object）
 
     /**
      * 通过 EventChannel 向 Flutter 推送播报状态
@@ -236,11 +234,13 @@ class TtsBroadcastService : Service() {
             TTS_ACTION_STOP -> {
                 DebugLogger.log("TTS", "ACTION_STOP received → releasing everything")
                 releaseEverything()
+                _syncSpeakingToFlutter()  // 同步 Flutter _speaking 状态
                 stopSelf()
                 return START_NOT_STICKY
             }
             TTS_ACTION_PAUSE -> {
                 isPaused = true
+                isSpeaking = false
                 tts?.stop()
                 updateNotification("播报已暂停", null, false)
                 updatePlaybackStateCompat(PlaybackStateCompat.STATE_PAUSED)
@@ -251,6 +251,7 @@ class TtsBroadcastService : Service() {
             }
             TTS_ACTION_RESUME -> {
                 isPaused = false
+                isSpeaking = true
                 updateNotification("听股通播报中", null, false)
                 updatePlaybackStateCompat(PlaybackStateCompat.STATE_PLAYING)
                 _syncSpeakingToFlutter()  // 同步 Flutter _speaking 状态
