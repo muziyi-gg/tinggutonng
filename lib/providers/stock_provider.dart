@@ -48,6 +48,8 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
   bool _speaking = false;
   /// 标记当前是否正在执行播报（单次循环内，防止重叠）
   bool _isReporting = false;
+  /// 原生 TtsBroadcastService 正在播报（锁屏时由 EventChannel 同步）
+  bool _nativeTtsPlaying = false;
 
   /// 当前错误（UI 层负责展示和清除）
   ReportError? _lastError;
@@ -71,7 +73,7 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
   bool get isPolling => _isPolling;
   int get reportIntervalSec => _reportIntervalSec;
   ReportError? get lastError => _lastError;
-  bool get isSpeaking => _speaking;
+  bool get isSpeaking => _speaking || _nativeTtsPlaying;
   List<DebugLogEntry> get debugLog => List.unmodifiable(_debugLog);
   AppLifecycleState get appLifecycle => _appLifecycle;
   bool get ttsIsPlaying => _tts.isPlaying;
@@ -95,6 +97,15 @@ class StockProvider extends ChangeNotifier with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     // 将 TTS 内部日志合并到 SP.debugLog，方便调试页面查看完整日志链
     _tts.registerLogCallback((tag, msg) => _log(tag, msg));
+    // 接收原生 TtsBroadcastService 推送的播报状态（锁屏时原生 TTS 播报开始/结束）
+    _tts.setOnServiceStateChange((isPlaying, isPaused) {
+      _nativeTtsPlaying = isPlaying && !isPaused;
+      if (!isPlaying && _speaking) {
+        // 原生播报结束，但用户未主动停止 → 标记为当前播报周期结束，下次定时器到期继续
+        _log('service_events', 'Native TTS finished, isPaused=$isPaused, keeping _speaking=$_speaking');
+      }
+      notifyListeners();
+    });
     // 注册实时行情日志
     _rtq.onLog = (msg) => _log('RTQ', msg);
     await _tts.init();

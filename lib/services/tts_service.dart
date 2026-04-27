@@ -28,11 +28,15 @@ class TtsLifecycleEvent {
 
 /// 外部注入的日志回调（由 StockProvider 注入，用于合并 TTS 日志到 SP.debugLog）
 typedef TtsLogCallback = void Function(String tag, String msg);
+typedef ServiceStateCallback = void Function(bool isPlaying, bool isPaused);
 TtsLogCallback? _externalLogCallback;
 
 class TtsService with WidgetsBindingObserver {
   final FlutterTts _tts = FlutterTts();
   static const _serviceChannel = MethodChannel('com.tingutong.app/tts_service');
+  static const _serviceEventsChannel = EventChannel('com.tingutong.app/tts_service_events');
+  StreamSubscription? _serviceEventsSubscription;
+  ServiceStateCallback? _onServiceStateChange;
   TtsState _state = TtsState.idle;
   Timer? _safetyTimer;
   String _currentLanguage = 'zh-CN';
@@ -75,6 +79,11 @@ class TtsService with WidgetsBindingObserver {
   void registerLogCallback(TtsLogCallback callback) {
     _externalLogCallback = callback;
     _log('debug', 'TTS log callback registered');
+  }
+
+  /// 注册服务状态变化回调（由 StockProvider 调用，接收原生 TtsBroadcastService 推送的播报状态）
+  void setOnServiceStateChange(ServiceStateCallback? callback) {
+    _onServiceStateChange = callback;
   }
 
   void _log(String type, String msg) {
@@ -239,6 +248,21 @@ class TtsService with WidgetsBindingObserver {
 
       _log('debug', 'TTS init complete successfully');
       _initDone = true;
+
+      // 监听 TtsBroadcastService 推送的状态（锁屏时原生 TTS 播报状态变化）
+      _serviceEventsSubscription?.cancel();
+      _serviceEventsSubscription = _serviceEventsChannel.receiveBroadcastStream().listen(
+        (dynamic data) {
+          if (data is Map) {
+            final isPlaying = data['isPlaying'] as bool? ?? false;
+            final isPaused = data['isPaused'] as bool? ?? false;
+            _log('service_events', 'isPlaying=$isPlaying, isPaused=$isPaused');
+            // 通知外部（StockProvider）同步状态
+            _onServiceStateChange?.call(isPlaying, isPaused);
+          }
+        },
+        onError: (e) => _log('service_events', 'ERROR: $e'),
+      );
     } catch (e, st) {
       _log('debug', 'TTS init FAILED: $e\n$st');
       _initError = '$e';
@@ -530,6 +554,7 @@ class TtsService with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _cancelSafetyTimer();
+    _serviceEventsSubscription?.cancel();
     _tts.stop();
   }
 }

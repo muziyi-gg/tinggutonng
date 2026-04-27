@@ -1,49 +1,46 @@
 package com.tingutong.app
 
-import android.app.AlarmManager
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.os.Build
-import android.os.Bundle
 import android.provider.Settings
-import android.net.Uri
+import android.util.Log
+import androidx.core.content.ContextCompat
+import androidx.core.app.NotificationCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
-import androidx.core.app.NotificationCompat
 
-/**
- * ================================================================
- * MainActivity — MethodChannel 入口
- * ================================================================
- *
- * 职责：处理 Flutter 层发来的后台播报请求
- * 核心流程：
- *   startBackgroundReporting()
- *     1. 保存播报配置到 SharedPreferences（供 Alarm 唤醒后读取）
- *     2. 设置 AlarmManager 定时器
- *     3. 立即触发一次 TtsBroadcastService（首次播报）
- *
- * 注意：
- *   - 不再启动 TtsForegroundService（它和 TtsBroadcastService 冲突）
- *   - TtsBroadcastService 本身就是 foregroundServiceType="mediaPlayback"
- *   - 熄屏播报完全由 AlarmManager → TtsBroadcastService 驱动
- */
 class MainActivity : FlutterActivity() {
 
     private val CHANNEL = "com.tingutong.app/tts_service"
+    private val SERVICE_EVENTS_CHANNEL = "com.tingutong.app/tts_service_events"
     private val DEBUG_CHANNEL_ID = "debug_channel"
     private val DEBUG_NOTIFICATION_ID = 999
+    private var screenStateEventSink: EventChannel.EventSink? = null
+    private var screenReceiver: BroadcastReceiver? = null
 
     companion object {
         const val PREFS_NAME = "FlutterSharedPreferences"
-        const val KEY_STOCK_NAMES = "tingutong_stock_names"
-        const val KEY_STOCK_CODES = "tingutong_stock_codes"
         const val KEY_REPORT_INTERVAL = "tingutong_report_interval"
-        const val KEY_BACKGROUND_ACTIVE = "tingutong_background_active"
+        const val KEY_STOCK_CODES = "tingutong_stock_codes"
+        const val KEY_STOCK_NAMES = "tingutong_stock_names"
+        private const val TAG = "TingutongMain"
+    }
+
+    private var pendingStartCallback: (() -> Unit)? = null
+
+    override fun onDestroy() {
+        screenReceiver?.let { unregisterReceiver(it) }
+        screenReceiver = null
+        super.onDestroy()
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -52,38 +49,17 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
 
-                // ─────────────────────────────────────────
-                // 启动后台播报（熄屏定时播报入口）
-                // ─────────────────────────────────────────
                 "startBackgroundReporting" -> {
-                    try {
-                        val interval = call.argument<Int>("intervalSec") ?: 60
-                        val stockNamesJson = call.argument<String>("stockNamesJson") ?: "{}"
-                        val stockCodesJson = call.argument<String>("stockCodesJson") ?: "[]"
-
-                        // 保存配置（供 Alarm 触发时 TtsBroadcastService 读取）
-                        saveReportingConfig(interval, stockNamesJson, stockCodesJson)
-
-                        // 立即触发首次播报
-                        triggerBroadcastService(interval)
-
-                        // 设置 AlarmManager 定时器
-                        scheduleNextReport(interval)
-
-                        showDebugNotification("✅ 熄屏播报已开启，间隔=${interval}秒")
-
-                        result.success(true)
-                    } catch (e: SecurityException) {
-                        showDebugNotification("⚠️ 精确闹钟权限被拒，请去系统设置开启")
-                        result.error("EXACT_ALARM_PERMISSION_DENIED", "SCHEDULE_EXACT_ALARM permission denied", null)
-                    } catch (e: Exception) {
-                        showDebugNotification("❌ 熄屏播报异常：${e.message}")
-                        result.error("NATIVE_ERROR", e.message, null)
-                    }
+                    val interval = call.argument<Int>("intervalSec") ?: 60
+                    val stockNamesJson = call.argument<String>("stockNamesJson") ?: "{}"
+                    val stockCodesJson = call.argument<String>("stockCodesJson") ?: "[]"
+                    saveReportingConfig(interval, stockNamesJson, stockCodesJson)
+                    checkPermissionsAndStart(interval)
+                    result.success(true)
                 }
 
                 "stopBackgroundReporting" -> {
-                    cancelBackgroundReporting()
+                    stopAllServices()
                     result.success(true)
                 }
 
@@ -95,19 +71,6 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
 
-                "openExactAlarmSettings" -> {
-                    try {
-                        val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
-                        startActivity(intent)
-                        result.success(true)
-                    } catch (e: Exception) {
-                        result.error("OPEN_SETTINGS_ERROR", e.message, null)
-                    }
-                }
-
-                // ─────────────────────────────────────────
-                // 电池优化引导（国产手机必须）
-                // ─────────────────────────────────────────
                 "guideBatteryOptimization" -> {
                     guideBatteryOptimization()
                     result.success(true)
@@ -129,70 +92,198 @@ class MainActivity : FlutterActivity() {
                     result.success(isRestrictiveManufacturer())
                 }
 
-                // ─────────────────────────────────────────
-                // 前台手动触发播报（App 在前台时）
-                // ─────────────────────────────────────────
                 "triggerBackgroundSpeak" -> {
-                    val interval = call.argument<Int>("intervalSec") ?: 60
-                    triggerBroadcastService(interval)
+                    triggerBroadcastService()
                     result.success(true)
                 }
 
+                "openExactAlarmSettings" -> {
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+                            startActivity(intent)
+                        }
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("OPEN_SETTINGS_ERROR", e.message, null)
+                    }
+                }
+
                 "stopTtsService" -> {
-                    TtsBroadcastService.stopService(this)
+                    Intent(this, TtsBroadcastService::class.java).also { act -> act.action = TtsBroadcastService.TTS_ACTION_STOP; startService(act) }
                     result.success(true)
                 }
 
                 else -> result.notImplemented()
             }
         }
-    }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        // 检测悬浮窗权限（部分厂商需要）
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (!Settings.canDrawOverlays(this)) {
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName")
-                )
-                startActivity(intent)
+        // ─── 屏幕状态 EventChannel ─────────────────────
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, "com.tingutong.app/screen_state")
+            .setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(args: Any?, events: EventChannel.EventSink?) {
+                    screenStateEventSink = events
+                    // 通知 Flutter 当前屏幕状态
+                    events?.success(mapOf("screenOff" to DebugLogger._screenOn))
+                }
+                override fun onCancel(args: Any?) {
+                    screenStateEventSink = null
+                }
+            })
+
+        // ─── 播报服务状态 EventChannel（TtsBroadcastService 写入状态，Flutter 监听）──
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, SERVICE_EVENTS_CHANNEL)
+            .setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(args: Any?, events: EventChannel.EventSink?) {
+                    TtsBroadcastService.serviceEventSink = events
+                    Log.d(TAG, "tts_service_events: listener registered, sink=$events")
+                }
+                override fun onCancel(args: Any?) {
+                    TtsBroadcastService.serviceEventSink = null
+                    Log.d(TAG, "tts_service_events: listener cancelled")
+                }
+            })
+
+        // ─── Debug MethodChannel ───────────────────────
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.tingutong.app/debug").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "getDebugLogs" -> {
+                    val entries = DebugLogger.getLogEntries()
+                    val text = entries.joinToString("\n") { "${it.tag}|${it.msg}" }
+                    result.success(text)
+                }
+                "getComponentStatus" -> {
+                    val status = DebugLogger.getFullStatus()
+                    result.success(status.toString())
+                }
+                "clearDebugLogs" -> {
+                    DebugLogger.clearLogs()
+                    result.success(null)
+                }
+                "enableDebug" -> {
+                    DebugLogger.init(this@MainActivity)
+                    DebugLogger.enable()
+                    result.success(true)
+                }
+                else -> result.notImplemented()
             }
         }
-    }
 
-    // ═══════════════════════════════════════════
-    // 内部方法
-    // ═══════════════════════════════════════════
-
-    private fun saveReportingConfig(intervalSec: Int, stockNamesJson: String, stockCodesJson: String) {
-        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit()
-            .putInt(KEY_REPORT_INTERVAL, intervalSec)
-            .putString(KEY_STOCK_NAMES, stockNamesJson)
-            .putString(KEY_STOCK_CODES, stockCodesJson)
-            .putBoolean(KEY_BACKGROUND_ACTIVE, true)
-            .apply()
-    }
-
-    private fun clearReportingConfig() {
-        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit()
-            .putBoolean(KEY_BACKGROUND_ACTIVE, false)
-            .apply()
-    }
-
-    /**
-     * 立即启动 TtsBroadcastService，执行一次播报
-     * 在 Alarm 触发时由 TtsAlarmReceiver 调用，
-     * 也可在前台由 Flutter 层直接调用
-     */
-    private fun triggerBroadcastService(interval: Int) {
-        val intent = Intent(this, TtsBroadcastService::class.java).apply {
-            action = TtsBroadcastService.ACTION_SPEAK_REPORT
-            putExtra("report_interval", interval)
+        // ─── 屏幕广播监听：向 Flutter 推送状态 ───────
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_USER_PRESENT)
         }
+        screenReceiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context?, intent: Intent?) {
+                when (intent?.action) {
+                    Intent.ACTION_SCREEN_OFF -> {
+                        DebugLogger.log("SYSTEM", "屏幕熄灭")
+                        screenStateEventSink?.success(mapOf("screenOff" to true))
+                    }
+                    Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> {
+                        DebugLogger.log("SYSTEM", "屏幕点亮")
+                        screenStateEventSink?.success(mapOf("screenOff" to false))
+                    }
+                }
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(screenReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(screenReceiver, filter)
+        }
+
+        // 初始化 DebugLogger（注册屏幕监听）
+        DebugLogger.init(this@MainActivity)
+    }
+
+    // ═══════════════════════════════════════════
+    // 权限检查 & 启动服务
+    // ═══════════════════════════════════════════
+
+    private fun checkPermissionsAndStart(interval: Int) {
+        pendingStartCallback = { startAllServices(interval) }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                android.app.AlertDialog.Builder(this)
+                    .setTitle("通知权限")
+                    .setMessage("听股通需要通知权限以在锁屏时显示播报状态。点击确定跳转设置开启。")
+                    .setPositiveButton("确定") { _, _ ->
+                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                        intent.data = android.net.Uri.fromParts("package", packageName, null)
+                        startActivity(intent)
+                    }
+                    .setNegativeButton("取消") { _, _ ->
+                        // 即使没权限也继续启动（音频播报不依赖通知权限）
+                        pendingStartCallback?.invoke()
+                    }
+                    .show()
+                return
+            }
+        }
+        pendingStartCallback?.invoke()
+        pendingStartCallback = null
+    }
+
+    private fun startAllServices(interval: Int) {
+        createDebugNotificationChannel()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                try {
+                    showDebugNotification("📢 通知权限缺失，部分功能受限")
+                } catch (e: Exception) { Log.e(TAG, "showDebugNotification failed: $e") }
+            }
+        }
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val powerManager = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+                if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+                    try { showDebugNotification("⚠️ 请在设置中加入电池白名单，否则熄屏可能中断") } catch (e: Exception) { Log.e(TAG, "showDebug failed: $e") }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "startAllServices failed: $e")
+            return
+        }
+
+        val dataIntent = Intent(this, TtsDataService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(dataIntent)
+        } else {
+            startService(dataIntent)
+        }
+
+        val broadcastIntent = Intent(this, TtsBroadcastService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(broadcastIntent)
+        } else {
+            startService(broadcastIntent)
+        }
+
+        showDebugNotification("✅ 熄屏播报已开启，间隔=${interval}秒")
+        Log.d(TAG, "All services started")
+    }
+
+    private fun stopAllServices() {
+        Intent(this, TtsDataService::class.java).also { act -> act.action = TtsDataService.ACTION_STOP; startService(act) }
+        Intent(this, TtsBroadcastService::class.java).also { act -> act.action = TtsBroadcastService.TTS_ACTION_STOP; startService(act) }
+        clearReportingConfig()
+        createDebugNotificationChannel()
+        showDebugNotification("🛑 熄屏播报已关闭")
+        Log.d(TAG, "All services stopped")
+    }
+
+    private fun triggerBroadcastService() {
+        val intent = Intent(this, TtsBroadcastService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
         } else {
@@ -200,66 +291,30 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    /**
-     * 设置 AlarmManager 精确定时器
-     * 熄屏后由系统唤醒 TtsAlarmReceiver → TtsBroadcastService
-     */
-    private fun scheduleNextReport(intervalSec: Int) {
-        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val intent = Intent(this, TtsAlarmReceiver::class.java).apply {
-            action = TtsAlarmReceiver.ACTION_TTS_ALARM
-            putExtra(TtsAlarmReceiver.EXTRA_REPORT_INTERVAL, intervalSec)
-        }
-        val pendingIntent = PendingIntent.getBroadcast(
-            this,
-            TtsAlarmReceiver.REQUEST_CODE,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+    // ═══════════════════════════════════════════
+    // 配置保存
+    // ═══════════════════════════════════════════
 
-        // Android 12+ 检查精确闹钟权限
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (!alarmManager.canScheduleExactAlarms()) {
-                createDebugNotificationChannel()
-                showDebugNotification("⚠️ 精确闹钟权限被拒，熄屏播报可能延迟，请去设置开启")
-                return
-            }
-        }
-
-        val triggerTime = System.currentTimeMillis() + (intervalSec * 1000L)
-        alarmManager.setExactAndAllowWhileIdle(
-            AlarmManager.RTC_WAKEUP,
-            triggerTime,
-            pendingIntent
-        )
-
-        val triggerDate = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
-            .format(java.util.Date(triggerTime))
-        android.util.Log.d("MainActivity", "Alarm scheduled: next at $triggerDate")
+    private fun saveReportingConfig(intervalSec: Int, stockNamesJson: String, stockCodesJson: String) {
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit()
+            .putInt(KEY_REPORT_INTERVAL, intervalSec)
+            .putString(KEY_STOCK_CODES, stockCodesJson)
+            .putString(KEY_STOCK_NAMES, stockNamesJson)
+            .apply()
     }
 
-    /**
-     * 取消 AlarmManager 定时器
-     */
-    private fun cancelBackgroundReporting() {
-        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val intent = Intent(this, TtsAlarmReceiver::class.java).apply {
-            action = TtsAlarmReceiver.ACTION_TTS_ALARM
-        }
-        val pendingIntent = PendingIntent.getBroadcast(
-            this,
-            TtsAlarmReceiver.REQUEST_CODE,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        alarmManager.cancel(pendingIntent)
-        TtsBroadcastService.stopService(this)
-        clearReportingConfig()
-        showDebugNotification("🛑 熄屏播报已关闭")
+    private fun clearReportingConfig() {
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit()
+            .remove(KEY_REPORT_INTERVAL)
+            .remove(KEY_STOCK_CODES)
+            .remove(KEY_STOCK_NAMES)
+            .apply()
     }
 
     // ═══════════════════════════════════════════
-    // 厂商电池优化引导
+    // 电池优化引导
     // ═══════════════════════════════════════════
 
     private fun isRestrictiveManufacturer(): Boolean {
@@ -272,24 +327,22 @@ class MainActivity : FlutterActivity() {
                manufacturer.contains("oneplus") ||
                manufacturer.contains("vivo") ||
                manufacturer.contains("samsung") ||
-               manufacturer.contains("meizu") ||
-               manufacturer.contains("letv") ||
-               manufacturer.contains("coolpad")
+               manufacturer.contains("meizu")
     }
 
     private fun guideBatteryOptimization() {
         if (!isRestrictiveManufacturer()) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-                try { startActivity(intent) } catch (e: Exception) { }
+                try {
+                    val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                    startActivity(intent)
+                } catch (e: Exception) { }
             }
             return
         }
 
         val manufacturer = Build.MANUFACTURER.lowercase()
-        val intent = Intent().apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
-        }
+        val intent = Intent().apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
 
         when {
             manufacturer.contains("xiaomi") -> {
@@ -326,8 +379,10 @@ class MainActivity : FlutterActivity() {
             }
             else -> {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    val fallback = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-                    try { startActivity(fallback) } catch (e: Exception) { }
+                    try {
+                        val fallback = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                        startActivity(fallback)
+                    } catch (e: Exception) { }
                 }
                 return
             }
@@ -337,8 +392,10 @@ class MainActivity : FlutterActivity() {
             startActivity(intent)
         } catch (e: android.content.ActivityNotFoundException) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                val fallback = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-                try { startActivity(fallback) } catch (e2: Exception) { }
+                try {
+                    val fallback = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                    startActivity(fallback)
+                } catch (e2: Exception) { }
             }
         }
     }
@@ -346,6 +403,7 @@ class MainActivity : FlutterActivity() {
     // ═══════════════════════════════════════════
     // 调试通知
     // ═══════════════════════════════════════════
+
     private fun createDebugNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -353,7 +411,7 @@ class MainActivity : FlutterActivity() {
                 "调试通知",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "熄屏播报调试用通知"
+                description = "听股通调试用通知"
                 enableLights(true)
                 enableVibration(false)
             }
@@ -366,7 +424,7 @@ class MainActivity : FlutterActivity() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         nm.cancel(DEBUG_NOTIFICATION_ID)
         val notification = NotificationCompat.Builder(this, DEBUG_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_tts_notification)
+            .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setContentTitle("【听股通】")
             .setContentText(message)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
