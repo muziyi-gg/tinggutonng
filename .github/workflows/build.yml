@@ -68,7 +68,7 @@ jobs:
         if: env.EXIT_CODE == '0'
         uses: softprops/action-gh-release@v1
         with:
-          files: build/app/outputs/flutter-apk/app-release.apk
+          files: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
           name: 听股通 v${{ github.run_number }}
           body: "Build #${GITHUB_RUN_NUMBER}"
         env:

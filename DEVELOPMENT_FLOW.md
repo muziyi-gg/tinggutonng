@@ -40,12 +40,10 @@ git push
 - GitHub Actions 的 artifact（`actions/upload-artifact`）需要认证才能下载，匿名 API 返回 401
 - 解决方案：使用 `softprops/action-gh-release` 发布到 GitHub Release，这是永久公开链接，无需认证
 
-### Build 失败（持续排查中）
-- Run #147 是最近一次成功构建（2026-04-24 23:46）
-- 之后 7 次构建全部失败，失败步骤：`Build release APK`
-- 原因未明：沙盒中 build 成功，GitHub Actions 环境失败
-- 可能原因：环境缓存问题、Flutter SDK 状态不一致
-- **诊断方法**：在 workflow 中将 build log 发布到可公开访问的位置
+### Build 失败（已修复 2026-04-30）
+- **根因**：Flutter 构建输出的 APK 名称是 `app-arm64-v8a-release.apk`，但 workflow 填写的是 `app-release.apk`
+- Flutter 3.7+ 按 ABI 拆分构建产物，导致文件名变化
+- **修复**：更新 workflow 中 `files:` 路径为 `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk`
 
 ## 4. Workflow 配置（当前）
 
@@ -79,11 +77,10 @@ curl -X POST -H "Authorization: token TOKEN" https://api.github.com/repos/muziyi
 
 | 版本 | 文件名 | 大小 | 时间 |
 |------|--------|------|------|
-| v1.4.9 (最新有效) | tinggutong-v1.4.9-arm64-v8a.apk | 16M | 2026-04-23 |
-| v1.4.9 | tinggutong-v1.4.9-armeabi-v7a.apk | 14M | 2026-04-23 |
-| v1.4.9 | tinggutong-v1.4.9-x86_64.apk | 17M | 2026-04-23 |
+| v1.4.10 (最新) | tinggutong-latest-arm64-v8a.apk | 17M | 2026-04-30 |
+| v1.4.9 | tinggutong-v1.4.9-arm64-v8a.apk | 16M | 2026-04-23 |
 
-> ⚠️ GitHub Actions 构建的 APK 尚未成功下载到本地（Build #147 成功但下载 artifact 失败）
+> 本地构建成功，workflow 路径已修复（app-release.apk → app-arm64-v8a-release.apk）
 
 ## 7. GitHub Releases
 
